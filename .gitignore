@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+cache/
+voice_library/
+certs/
+*.log
+*.xml
+*.txt
+!requirements.txt
+!README.md

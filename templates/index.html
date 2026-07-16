@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>walla-gen</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-start:  #667eea;
+      --bg-end:    #764ba2;
+      --surface:   #ffffff;
+      --surface-soft: #f8f9ff;
+      --border:    #e0e0e0;
+      --amber:     #667eea;
+      --amber-dim: #764ba2;
+      --green:     #2e7d32;
+      --green-bg:  #e8f5e9;
+      --red:       #c62828;
+      --red-bg:    #ffebee;
+      --text:      #333333;
+      --muted:     #666666;
+      --white:     #333333;
+    }
+
+    html, body {
+      min-height: 100%;
+      background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
+      color: var(--text);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    body {
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    /* ── SCANLINE OVERLAY ── */
+    body::before {
+      content: '';
+      display: none;
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,.08) 2px,
+        rgba(0,0,0,.08) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── LAYOUT ── */
+    .shell {
+      max-width: 860px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px;
+      background: var(--surface);
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+
+    /* ── HEADER ── */
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 18px;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 12px;
+    }
+    header h1 {
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: 0;
+      color: var(--amber);
+      line-height: 1;
+    }
+    .app-version {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    header .sub {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .on-air {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: var(--muted);
+    }
+    .on-air .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s;
+    }
+    .on-air.active .dot { background: var(--red); box-shadow: 0 0 6px var(--red); }
+    .on-air.active { color: var(--red); }
+
+    /* ── SECTION LABELS ── */
+    .section-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 10px;
+    }
+
+    /* ── CARD ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+
+    /* ── INPUTS ── */
+    label {
+      display: block;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    textarea, input[type="number"], select {
+      width: 100%;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 14px;
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color .2s;
+      resize: vertical;
+    }
+    textarea:focus, input[type="number"]:focus, select:focus {
+      border-color: var(--amber-dim);
+      box-shadow: 0 0 0 3px rgba(102,126,234,.12);
+    }
+    textarea { min-height: 86px; }
+    input[type="number"] { width: 120px; }
+    select { width: 220px; }
+
+    /* ── ROW ── */
+    .row { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; }
+    .row .grow { flex: 1; min-width: 200px; }
+
+    .voice-reference-row {
+      align-items: flex-start;
+      gap: 18px;
+    }
+    .voice-library-panel {
+      flex: 0 0 260px;
+    }
+    .voice-library-panel select,
+    .voice-library-panel input[type="number"] {
+      width: 100%;
+    }
+    .voice-library-controls {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .voice-library-controls select {
+      flex: 1;
+      min-width: 0;
+    }
+    .btn-icon {
+      width: 44px;
+      padding: 0;
+      letter-spacing: 0;
+      flex: 0 0 44px;
+    }
+    .voice-drop-panel {
+      flex: 1;
+      min-width: 280px;
+    }
+
+    /* ── FILE DROP ── */
+    .drop-zone {
+      border: 2px dashed var(--amber);
+      border-radius: 12px;
+      padding: 14px 16px;
+      text-align: center;
+      background: var(--surface-soft);
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--amber-dim);
+      background: #f0f2ff;
+    }
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .drop-zone .icon {
+      font-size: 22px;
+      margin-bottom: 4px;
+      color: var(--muted);
+    }
+    .drop-zone .hint {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .drop-zone .file-name {
+      margin-top: 8px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: var(--amber);
+    }
+
+    /* ── BUTTONS ── */
+    .btn {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 12px 28px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: opacity .2s, transform .2s, box-shadow .2s, background .2s;
+      white-space: nowrap;
+    }
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--amber) 0%, var(--amber-dim) 100%);
+      color: white;
+    }
+    .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(102,126,234,0.3); }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--amber);
+      border: 1px solid var(--amber);
+    }
+    .btn-secondary:hover:not(:disabled) { background: #f0f2ff; }
+
+    .btn-danger {
+      background: #c62828;
+      color: white;
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: #b71c1c;
+      box-shadow: 0 8px 16px rgba(198,40,40,.24);
+    }
+
+    .btn-recording {
+      background: #c62828;
+      color: white;
+      border-color: #c62828;
+    }
+    .btn-recording:hover:not(:disabled) { background: #b71c1c; }
+
+    .btn-green {
+      background: linear-gradient(135deg, var(--amber) 0%, var(--amber-dim) 100%);
+      color: white;
+    }
+    .btn-green:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(102,126,234,0.3); }
+
+    .btn-small {
+      padding: 7px 12px;
+      font-size: 10px;
+      letter-spacing: 1px;
+    }
+
+    .label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .label-row label { margin-bottom: 0; }
+
+    .language-toggle {
+      display: inline-flex;
+      border: 1px solid var(--amber);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface-soft);
+    }
+    .language-toggle button {
+      background: transparent;
+      border: none;
+      color: var(--amber);
+      cursor: pointer;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      padding: 9px 14px;
+      text-transform: uppercase;
+      transition: background .2s, color .2s;
+    }
+    .language-toggle button.active {
+      background: linear-gradient(135deg, var(--amber) 0%, var(--amber-dim) 100%);
+      color: white;
+    }
+
+    .mic-meter {
+      width: 100%;
+      height: 8px;
+      margin-top: 8px;
+      overflow: hidden;
+      background: #eceef8;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+    .mic-meter-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #2e7d32 0%, #667eea 60%, #c62828 100%);
+      transition: width .08s linear;
+    }
+    .mic-meter.active {
+      border-color: var(--amber);
+      box-shadow: 0 0 0 3px rgba(102,126,234,.10);
+    }
+
+    /* ── SCRIPT AREA ── */
+    #script-section { display: none; }
+
+    #script-output {
+      width: 100%;
+      min-height: 180px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--white);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 15px;
+      line-height: 1.75;
+      padding: 16px;
+      outline: none;
+      resize: vertical;
+      transition: border-color .2s;
+    }
+    #script-output:focus { border-color: var(--amber-dim); }
+
+    .script-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+
+    /* ── STATUS / PROGRESS ── */
+    .status-bar {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 14px;
+      min-height: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-bar.ok { color: var(--green); }
+    .status-bar.err { color: var(--red); }
+    .status-bar.loading { color: var(--amber); }
+
+    .spinner {
+      width: 12px; height: 12px;
+      border: 2px solid transparent;
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── PROGRESS STEPS ── */
+    .steps {
+      display: flex;
+      gap: 0;
+      margin-bottom: 16px;
+    }
+    .step {
+      flex: 1;
+      text-align: center;
+      padding: 8px 0;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 2px solid var(--border);
+      transition: color .3s, border-color .3s;
+    }
+    .step.active { color: var(--amber); border-color: var(--amber); }
+    .step.done { color: var(--green); border-color: var(--green); }
+
+    /* ── DOWNLOAD BLOCK ── */
+    #download-section {
+      display: none;
+      background: var(--green-bg);
+      border: 1px solid #81c784;
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      margin-top: 20px;
+    }
+    #download-section .big-icon { font-size: 36px; margin-bottom: 8px; }
+    #download-section p {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: var(--green);
+      margin-bottom: 16px;
+      letter-spacing: 1px;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      margin-top: 16px;
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+    }
+    footer a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+    footer a:hover { color: var(--amber); }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <h1>walla-gen</h1>
+    <span class="app-version">v1.0</span>
+    <button class="btn btn-danger btn-small" id="btn-clear-cache" type="button">Clear Cache</button>
+    <span class="sub">Générateur de voix par IA</span>
+    <div class="on-air" id="on-air-indicator">
+      <div class="dot"></div>
+      <span>STANDBY</span>
+    </div>
+  </header>
+
+  <!-- STEP INDICATORS -->
+  <div class="steps">
+    <div class="step active" id="step1">01 · Scénario</div>
+    <div class="step" id="step2">02 · Script</div>
+    <div class="step" id="step3">03 · Audio</div>
+  </div>
+
+  <!-- STEP 1 : INPUT -->
+  <div id="input-section">
+    <div class="section-label">Scénario &amp; paramètres</div>
+    <div class="card">
+      <div style="margin-bottom:14px">
+        <label>Langue du script</label>
+        <div class="language-toggle" role="group" aria-label="Langue du script">
+          <button type="button" class="active" data-language="fr" aria-pressed="true">Français</button>
+          <button type="button" data-language="en" aria-pressed="false">Anglais</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <div class="label-row">
+          <label for="scenario">Décrivez le scénario</label>
+          <button class="btn btn-secondary btn-small" id="btn-mic-test" type="button">🎙 Micro dictée</button>
+        </div>
+        <textarea id="scenario" placeholder="ex: une lectrice de nouvelles québécoise remercie un journaliste pour son reportage, puis enchaîne sur la météo — il va faire très froid, sous les normales saisonnières, partout au Québec."></textarea>
+        <div class="mic-meter" id="mic-meter" aria-hidden="true">
+          <div class="mic-meter-fill" id="mic-meter-fill"></div>
+        </div>
+        <div class="status-bar" id="status-mic"></div>
+      </div>
+
+      <div class="row voice-reference-row">
+        <div class="voice-library-panel">
+          <div style="margin-bottom:14px">
+            <label for="voice-library">Librairie de voix de référence</label>
+            <div class="voice-library-controls">
+              <select id="voice-library">
+                <option value="">Chargement des voix sauvegardées...</option>
+              </select>
+              <button class="btn btn-secondary btn-icon" id="btn-preview-voice" type="button" disabled title="Écouter la voix sauvegardée" aria-label="Écouter la voix sauvegardée">▶</button>
+            </div>
+            <div class="status-bar" id="status-library"></div>
+          </div>
+          <div>
+            <label for="duration">Durée approximative (sec)</label>
+            <input type="number" id="duration" value="10" min="5" max="18" />
+          </div>
+        </div>
+        <div class="voice-drop-panel">
+          <div class="label-row">
+            <label>Voix de référence (WAV / MP3 — 8 à 15 sec, voix seule)</label>
+            <button class="btn btn-secondary btn-small" id="btn-save-voice" type="button">Sauvegarder</button>
+          </div>
+          <div class="drop-zone" id="drop-zone">
+            <input type="file" id="audio-ref" accept=".wav,.mp3,.ogg,.flac,.m4a" />
+            <div class="icon">🎙</div>
+            <div class="hint">Déposer un fichier audio ici ou cliquer pour parcourir</div>
+            <div class="file-name" id="file-name"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <label for="ref-text">Transcription exacte de la voix de référence (requise pour le clonage)</label>
+        <textarea id="ref-text" placeholder="Texte exact prononcé dans le fichier de référence."></textarea>
+        <div style="margin-top:8px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-transcribe-ref">Transcrire la référence</button>
+          <div class="status-bar" id="status-transcribe"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-generate-script">Générer le script →</button>
+        <div class="status-bar" id="status-script"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2 : SCRIPT REVIEW -->
+  <div id="script-section">
+    <div class="section-label">Révision du script</div>
+    <div class="card">
+      <label for="script-output">Script généré — modifiable avant génération audio</label>
+      <textarea id="script-output"></textarea>
+      <div style="margin-top:12px">
+        <label for="voice-direction">Direction de jeu / intonation</label>
+        <textarea id="voice-direction" placeholder="ex: voix bouleversée, souffle court, au bord des larmes, avec quelques hésitations; ou: ton urgent, plus fort, presque crié, très tendu."></textarea>
+        <div style="margin-top:8px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-generate-direction">Auto-direction</button>
+          <div class="status-bar" id="status-direction"></div>
+        </div>
+      </div>
+      <div class="script-actions">
+        <button class="btn btn-green" id="btn-generate-audio">🎙 Générer l'audio</button>
+        <button class="btn btn-secondary" id="btn-regen-script">↻ Regénérer le script</button>
+        <button class="btn btn-secondary" id="btn-copy">Copier le script</button>
+        <div class="status-bar" id="status-audio"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3 : DOWNLOAD -->
+  <div id="download-section">
+    <div class="big-icon">✅</div>
+    <p>Fichier WAV généré avec succès</p>
+    <button class="btn btn-green" id="btn-download">⬇ Télécharger le WAV</button>
+    <div style="margin-top:14px; display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
+      <button class="btn btn-secondary" id="btn-back-script">Retour au script</button>
+      <button class="btn btn-secondary" id="btn-new">Nouvelle génération</button>
+    </div>
+  </div>
+
+  <footer>
+    <span>walla-gen · v1.0</span>
+    <span>
+      Claude Haiku · Qwen3-TTS ·
+      <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Claude Billing</a>
+      ·
+      <a href="https://replicate.com/account/billing" target="_blank" rel="noopener">Replicate Billing</a>
+    </span>
+  </footer>
+
+</div>
+
+<script>
+  // ── STATE ──
+  let generatedBlob = null;
+  let savedVoices = [];
+  let selectedLibraryVoiceId = '';
+  let currentLanguage = 'fr';
+  let previewAudio = null;
+  let micRecorder = null;
+  let micStream = null;
+  let micChunks = [];
+  let micAudioContext = null;
+  let micAnalyser = null;
+  let micMeterFrame = null;
+  let micIsStopping = false;
+
+  // ── ELEMENTS ──
+  const scenarioEl    = document.getElementById('scenario');
+  const durationEl    = document.getElementById('duration');
+  const languageButtons = document.querySelectorAll('[data-language]');
+  const refTextEl     = document.getElementById('ref-text');
+  const voiceLibraryEl = document.getElementById('voice-library');
+  const audioRefEl    = document.getElementById('audio-ref');
+  const fileNameEl    = document.getElementById('file-name');
+  const dropZoneEl    = document.getElementById('drop-zone');
+
+  const btnClearCache = document.getElementById('btn-clear-cache');
+  const btnMicTest    = document.getElementById('btn-mic-test');
+  const btnGenScript  = document.getElementById('btn-generate-script');
+  const btnTranscribe = document.getElementById('btn-transcribe-ref');
+  const btnSaveVoice  = document.getElementById('btn-save-voice');
+  const btnPreviewVoice = document.getElementById('btn-preview-voice');
+  const btnGenDirection = document.getElementById('btn-generate-direction');
+  const btnRegenScript= document.getElementById('btn-regen-script');
+  const btnGenAudio   = document.getElementById('btn-generate-audio');
+  const btnCopy       = document.getElementById('btn-copy');
+  const btnDownload   = document.getElementById('btn-download');
+  const btnBackScript = document.getElementById('btn-back-script');
+  const btnNew        = document.getElementById('btn-new');
+
+  const scriptOutput  = document.getElementById('script-output');
+  const voiceDirectionEl = document.getElementById('voice-direction');
+  const micMeterEl    = document.getElementById('mic-meter');
+  const micMeterFillEl = document.getElementById('mic-meter-fill');
+  const statusMic     = document.getElementById('status-mic');
+  const statusScript  = document.getElementById('status-script');
+  const statusTranscribe = document.getElementById('status-transcribe');
+  const statusLibrary = document.getElementById('status-library');
+  const statusDirection = document.getElementById('status-direction');
+  const statusAudio   = document.getElementById('status-audio');
+
+  const inputSection    = document.getElementById('input-section');
+  const scriptSection   = document.getElementById('script-section');
+  const downloadSection = document.getElementById('download-section');
+  const onAirIndicator  = document.getElementById('on-air-indicator');
+
+  const step1 = document.getElementById('step1');
+  const step2 = document.getElementById('step2');
+  const step3 = document.getElementById('step3');
+
+  // ── FILE DROP ──
+  audioRefEl.addEventListener('change', () => {
+    if (audioRefEl.files[0]) {
+      useManualAudioFile(audioRefEl.files[0]);
+    }
+  });
+  ['dragover','dragenter'].forEach(e => dropZoneEl.addEventListener(e, ev => {
+    ev.preventDefault(); dropZoneEl.classList.add('dragover');
+  }));
+  ['dragleave','drop'].forEach(e => dropZoneEl.addEventListener(e, ev => {
+    ev.preventDefault(); dropZoneEl.classList.remove('dragover');
+  }));
+  dropZoneEl.addEventListener('drop', ev => {
+    const file = ev.dataTransfer.files[0];
+    if (file) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      audioRefEl.files = dt.files;
+      useManualAudioFile(file);
+    }
+  });
+
+  // ── HELPERS ──
+  function setStatus(el, type, msg, spinning = false) {
+    el.className = 'status-bar ' + type;
+    el.innerHTML = spinning
+      ? `<div class="spinner"></div><span>${msg}</span>`
+      : msg;
+  }
+
+  function setOnAir(active) {
+    if (active) {
+      onAirIndicator.classList.add('active');
+      onAirIndicator.querySelector('span').textContent = 'ON AIR';
+    } else {
+      onAirIndicator.classList.remove('active');
+      onAirIndicator.querySelector('span').textContent = 'STANDBY';
+    }
+  }
+
+  function setSteps(active) {
+    [step1, step2, step3].forEach((s, i) => {
+      s.className = 'step' + (i + 1 < active ? ' done' : i + 1 === active ? ' active' : '');
+    });
+  }
+
+  async function readJsonOrThrow(res) {
+    const text = await res.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(text.slice(0, 240) || `Erreur HTTP ${res.status}`);
+    }
+    if (!res.ok) throw new Error(data.error || `Erreur HTTP ${res.status}`);
+    return data;
+  }
+
+  function hasReferenceAudio() {
+    return !!audioRefEl.files[0] || !!selectedLibraryVoiceId;
+  }
+
+  function setLanguage(language) {
+    currentLanguage = language === 'en' ? 'en' : 'fr';
+    languageButtons.forEach(button => {
+      const active = button.dataset.language === currentLanguage;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+
+    const selectedVoice = savedVoices.find(voice => voice.id === selectedLibraryVoiceId);
+    if (selectedVoice && !voiceMatchesLanguage(selectedVoice)) {
+      selectLibraryVoice('');
+    }
+    renderVoiceLibrary();
+  }
+
+  function stopVoicePreview() {
+    if (previewAudio) {
+      previewAudio.pause();
+      previewAudio.currentTime = 0;
+      previewAudio = null;
+    }
+    btnPreviewVoice.textContent = '▶';
+  }
+
+  function stopMicTracks() {
+    if (micStream) {
+      micStream.getTracks().forEach(track => track.stop());
+      micStream = null;
+    }
+  }
+
+  function micStreamIsLive() {
+    return micStream && micStream.getTracks().some(track => track.readyState === 'live');
+  }
+
+  async function ensureMicStream() {
+    if (micStreamIsLive()) {
+      return micStream;
+    }
+
+    stopMicTracks();
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: true
+      }
+    });
+    return micStream;
+  }
+
+  function resetMicMeter() {
+    if (micMeterFrame) {
+      cancelAnimationFrame(micMeterFrame);
+      micMeterFrame = null;
+    }
+    if (micAudioContext) {
+      micAudioContext.close().catch(() => {});
+      micAudioContext = null;
+    }
+    micAnalyser = null;
+    micMeterEl.classList.remove('active');
+    micMeterFillEl.style.width = '0%';
+  }
+
+  function startMicMeter(stream) {
+    resetMicMeter();
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      setStatus(statusMic, 'loading', 'Enregistrement micro en cours… vumètre indisponible.', true);
+      return;
+    }
+
+    micAudioContext = new AudioContextClass();
+    const source = micAudioContext.createMediaStreamSource(stream);
+    micAnalyser = micAudioContext.createAnalyser();
+    micAnalyser.fftSize = 2048;
+    source.connect(micAnalyser);
+
+    const data = new Uint8Array(micAnalyser.fftSize);
+    micMeterEl.classList.add('active');
+
+    const draw = () => {
+      if (!micAnalyser) return;
+      micAnalyser.getByteTimeDomainData(data);
+
+      let sumSquares = 0;
+      let peak = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        const sample = (data[i] - 128) / 128;
+        sumSquares += sample * sample;
+        peak = Math.max(peak, Math.abs(sample));
+      }
+
+      const rms = Math.sqrt(sumSquares / data.length);
+      const level = Math.min(100, Math.max(peak * 115, rms * 420));
+      micMeterFillEl.style.width = `${level.toFixed(1)}%`;
+      micMeterFrame = requestAnimationFrame(draw);
+    };
+
+    draw();
+  }
+
+  function pickMicMimeType() {
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
+    const firefox = navigator.userAgent.toLowerCase().includes('firefox');
+    const candidates = firefox
+      ? ['audio/ogg;codecs=opus', 'audio/ogg', 'audio/webm;codecs=opus', 'audio/webm']
+      : ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg'];
+    return candidates.find(type => MediaRecorder.isTypeSupported(type)) || '';
+  }
+
+  async function uploadMicBlob(blob, mimeType) {
+    const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
+    const formData = new FormData();
+    formData.append('mic_audio', blob, `scenario-dictee.${extension}`);
+
+    const res = await fetch('/mic-test', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await readJsonOrThrow(res);
+    const kb = Math.round((data.bytes || 0) / 1024);
+    const transcript = (data.transcript || '').trim();
+    if (!transcript) {
+      setStatus(statusMic, 'err', '✗ Transcription micro vide.');
+      return;
+    }
+
+    scenarioEl.value = scenarioEl.value.trim()
+      ? `${scenarioEl.value.trim()}\n${transcript}`
+      : transcript;
+    scenarioEl.focus();
+    setStatus(statusMic, 'ok', `✓ Dictée ajoutée au scénario (${kb} Ko)`);
+  }
+
+  async function stopMicTest() {
+    if (!micRecorder || micRecorder.state !== 'recording' || micIsStopping) {
+      return;
+    }
+
+    micIsStopping = true;
+    btnMicTest.disabled = true;
+    setStatus(statusMic, 'loading', 'Finalisation de la dictée micro…', true);
+
+    try {
+      micRecorder.requestData();
+    } catch (err) {
+      // Firefox peut ignorer requestData() selon le format; stop() videra quand même le tampon.
+    }
+
+    window.setTimeout(() => {
+      if (micRecorder && micRecorder.state === 'recording') {
+        micRecorder.stop();
+      }
+    }, 120);
+  }
+
+  async function startMicTest() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const contextHint = window.isSecureContext
+        ? ''
+        : ' Firefox bloque souvent le micro hors HTTPS/localhost.';
+      setStatus(statusMic, 'err', '✗ Micro indisponible dans ce navigateur ou cette adresse.' + contextHint);
+      return;
+    }
+    if (!window.MediaRecorder) {
+      setStatus(statusMic, 'err', '✗ MediaRecorder non disponible dans ce navigateur.');
+      return;
+    }
+
+    btnMicTest.disabled = true;
+    setStatus(statusMic, 'loading', 'Demande accès micro…', true);
+
+    try {
+      if (micRecorder || micIsStopping) {
+        setStatus(statusMic, 'loading', 'Dictée micro déjà en cours…', true);
+        return;
+      }
+
+      const stream = await ensureMicStream();
+      startMicMeter(stream);
+      micChunks = [];
+      const mimeType = pickMicMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      micRecorder = recorder;
+
+      recorder.addEventListener('dataavailable', event => {
+        if (event.data && event.data.size > 0) {
+          micChunks.push(event.data);
+        }
+      });
+
+      recorder.addEventListener('stop', async () => {
+        btnMicTest.classList.remove('btn-recording');
+        btnMicTest.textContent = '🎙 Micro dictée';
+        resetMicMeter();
+
+        try {
+          const blobType = recorder.mimeType || mimeType || 'audio/webm';
+          const blob = new Blob(micChunks, { type: blobType });
+          if (!blob.size) {
+            setStatus(statusMic, 'err', '✗ Aucun audio capturé.');
+            return;
+          }
+          setStatus(statusMic, 'loading', 'Transcription de la dictée en cours…', true);
+          await uploadMicBlob(blob, blobType);
+        } catch (err) {
+          setStatus(statusMic, 'err', '✗ Dictée micro échouée : ' + err.message);
+        } finally {
+          if (micRecorder === recorder) {
+            micRecorder = null;
+          }
+          micChunks = [];
+          micIsStopping = false;
+          btnMicTest.disabled = false;
+        }
+      }, { once: true });
+
+      recorder.start(250);
+      btnMicTest.classList.add('btn-recording');
+      btnMicTest.textContent = '■ Stop micro';
+      setStatus(statusMic, 'loading', 'Enregistrement micro en cours… cliquez encore pour arrêter.', true);
+    } catch (err) {
+      resetMicMeter();
+      stopMicTracks();
+      const contextHint = window.isSecureContext
+        ? ''
+        : ' Si Firefox refuse, il faudra passer l’app en HTTPS ou tester depuis localhost.';
+      setStatus(statusMic, 'err', '✗ Accès micro refusé/impossible : ' + err.message + contextHint);
+      micRecorder = null;
+      micIsStopping = false;
+    } finally {
+      if (!micIsStopping) {
+        btnMicTest.disabled = false;
+      }
+    }
+  }
+
+  function useManualAudioFile(file) {
+    stopVoicePreview();
+    if (selectedLibraryVoiceId) {
+      refTextEl.value = '';
+    }
+    selectedLibraryVoiceId = '';
+    voiceLibraryEl.value = '';
+    fileNameEl.textContent = '📎 ' + file.name;
+    setStatus(statusLibrary, '', '');
+  }
+
+  function voiceMatchesLanguage(voice) {
+    const name = (voice.name || '').trim().toUpperCase();
+    const isFrenchVoice = name.startsWith('FRAN');
+    const isEnglishVoice = name.startsWith('ENG');
+
+    if (!isFrenchVoice && !isEnglishVoice) {
+      return true;
+    }
+    return currentLanguage === 'en' ? isEnglishVoice : isFrenchVoice;
+  }
+
+  function renderVoiceLibrary() {
+    const visibleVoices = savedVoices.filter(voiceMatchesLanguage);
+    voiceLibraryEl.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = visibleVoices.length
+      ? 'Sélectionner une voix sauvegardée...'
+      : 'Aucune voix sauvegardée';
+    voiceLibraryEl.appendChild(placeholder);
+
+    visibleVoices.forEach(voice => {
+      const option = document.createElement('option');
+      option.value = voice.id;
+      option.textContent = voice.name;
+      voiceLibraryEl.appendChild(option);
+    });
+
+    if (visibleVoices.some(voice => voice.id === selectedLibraryVoiceId)) {
+      voiceLibraryEl.value = selectedLibraryVoiceId;
+    } else {
+      selectedLibraryVoiceId = '';
+    }
+    btnPreviewVoice.disabled = !selectedLibraryVoiceId;
+  }
+
+  function selectLibraryVoice(voiceId) {
+    stopVoicePreview();
+    const voice = savedVoices.find(item => item.id === voiceId);
+    if (!voice) {
+      selectedLibraryVoiceId = '';
+      btnPreviewVoice.disabled = true;
+      if (!audioRefEl.files[0]) {
+        fileNameEl.textContent = '';
+        refTextEl.value = '';
+      }
+      setStatus(statusLibrary, '', '');
+      return;
+    }
+
+    selectedLibraryVoiceId = voice.id;
+    audioRefEl.value = '';
+    refTextEl.value = voice.transcript || '';
+    fileNameEl.textContent = '📚 ' + voice.name;
+    btnPreviewVoice.disabled = false;
+    setStatus(statusLibrary, 'ok', '✓ Voix chargée depuis la librairie');
+  }
+
+  async function loadVoiceLibrary(preselectId = '') {
+    try {
+      const res = await fetch('/voice-library', { cache: 'no-store' });
+      const data = await readJsonOrThrow(res);
+      savedVoices = data.voices || [];
+      if (preselectId) {
+        const preselectedVoice = savedVoices.find(voice => voice.id === preselectId);
+        selectedLibraryVoiceId = preselectedVoice && voiceMatchesLanguage(preselectedVoice)
+          ? preselectId
+          : '';
+      }
+      renderVoiceLibrary();
+      if (preselectId && selectedLibraryVoiceId === preselectId) {
+        selectLibraryVoice(preselectId);
+      }
+    } catch (err) {
+      savedVoices = [];
+      renderVoiceLibrary();
+      setStatus(statusLibrary, 'err', '✗ Librairie indisponible : ' + err.message);
+    }
+  }
+
+  function buildAudioFilename() {
+    const slug = scriptOutput.value
+      .trim()
+      .slice(0, 50)
+      .replace(/[œŒ]/g, match => match === 'œ' ? 'oe' : 'OE')
+      .replace(/[æÆ]/g, match => match === 'æ' ? 'ae' : 'AE')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, '_')
+      .replace(/[^A-Za-z_]/g, '')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    return `AI_GEN_${slug || 'AUDIO'}.wav`;
+  }
+
+  function downloadGeneratedAudio() {
+    if (!generatedBlob) return;
+    const url = URL.createObjectURL(generatedBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = buildAudioFilename();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ── GENERATE SCRIPT ──
+  async function generateScript() {
+    const scenario = scenarioEl.value.trim();
+    const duration = parseInt(durationEl.value) || 45;
+
+    if (!scenario) {
+      setStatus(statusScript, 'err', '⚠ Entrez un scénario avant de continuer.');
+      return;
+    }
+    if (!hasReferenceAudio()) {
+      setStatus(statusScript, 'err', '⚠ Ajoutez un fichier audio de référence.');
+      return;
+    }
+    if (!refTextEl.value.trim()) {
+      setStatus(statusScript, 'err', '⚠ Ajoutez la transcription exacte de la voix de référence.');
+      return;
+    }
+
+    btnGenScript.disabled = true;
+    btnRegenScript.disabled = true;
+    setStatus(statusScript, 'loading', 'Génération du script en cours…', true);
+    setOnAir(true);
+
+    try {
+      const res = await fetch('/generate-script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario, duration, language: currentLanguage })
+      });
+      const data = await readJsonOrThrow(res);
+
+      scriptOutput.value = data.script;
+      setStatus(statusScript, 'ok', '✓ Script généré');
+      setOnAir(false);
+      setSteps(2);
+
+      inputSection.style.display = 'none';
+      scriptSection.style.display = 'block';
+      scriptOutput.focus();
+
+    } catch (err) {
+      setStatus(statusScript, 'err', '✗ ' + err.message);
+      setOnAir(false);
+    } finally {
+      btnGenScript.disabled = false;
+      btnRegenScript.disabled = false;
+    }
+  }
+
+  btnGenScript.addEventListener('click', generateScript);
+
+  btnMicTest.addEventListener('click', () => {
+    if (micRecorder && micRecorder.state === 'recording') {
+      stopMicTest();
+    } else {
+      startMicTest();
+    }
+  });
+
+  btnClearCache.addEventListener('click', async () => {
+    const confirmed = window.confirm(
+      'Effacer le cache des fichiers input/output non sauvegardés?\n\n' +
+      'La librairie de voix sauvegardées ne sera PAS touchée.'
+    );
+    if (!confirmed) return;
+
+    resetMicMeter();
+    btnClearCache.disabled = true;
+    try {
+      const res = await fetch('/clear-cache', { method: 'POST' });
+      const data = await readJsonOrThrow(res);
+      const kb = Math.round((data.freed_bytes || 0) / 1024);
+      const details = data.errors && data.errors.length
+        ? `\n\nCertains fichiers n'ont pas pu être effacés:\n${data.errors.join('\n')}`
+        : '';
+      window.alert(`Cache nettoyé. ${data.deleted_files || 0} fichier(s) effacé(s), ${kb} Ko libérés.${details}`);
+    } catch (err) {
+      window.alert('Erreur pendant le nettoyage du cache : ' + err.message);
+    } finally {
+      btnClearCache.disabled = false;
+    }
+  });
+
+  languageButtons.forEach(button => {
+    button.addEventListener('click', () => setLanguage(button.dataset.language));
+  });
+
+  voiceLibraryEl.addEventListener('change', () => {
+    selectLibraryVoice(voiceLibraryEl.value);
+  });
+
+  btnPreviewVoice.addEventListener('click', async () => {
+    if (!selectedLibraryVoiceId) {
+      setStatus(statusLibrary, 'err', '⚠ Sélectionnez une voix sauvegardée.');
+      return;
+    }
+
+    if (previewAudio) {
+      stopVoicePreview();
+      return;
+    }
+
+    btnPreviewVoice.textContent = '■';
+    previewAudio = new Audio(`/voice-library/${encodeURIComponent(selectedLibraryVoiceId)}/audio`);
+    previewAudio.addEventListener('ended', stopVoicePreview, { once: true });
+    previewAudio.addEventListener('error', () => {
+      stopVoicePreview();
+      setStatus(statusLibrary, 'err', '✗ Lecture impossible pour cette voix.');
+    }, { once: true });
+
+    try {
+      await previewAudio.play();
+      setStatus(statusLibrary, 'ok', '✓ Lecture de la voix');
+    } catch (err) {
+      stopVoicePreview();
+      setStatus(statusLibrary, 'err', '✗ Lecture bloquée : ' + err.message);
+    }
+  });
+
+  btnTranscribe.addEventListener('click', async () => {
+    if (!hasReferenceAudio()) {
+      setStatus(statusTranscribe, 'err', '⚠ Ajoutez un fichier audio de référence.');
+      return;
+    }
+
+    btnTranscribe.disabled = true;
+    setStatus(statusTranscribe, 'loading', 'Transcription en cours…', true);
+
+    try {
+      const formData = new FormData();
+      if (audioRefEl.files[0]) {
+        formData.append('audio_reference', audioRefEl.files[0]);
+      } else {
+        formData.append('voice_library_id', selectedLibraryVoiceId);
+      }
+      formData.append('language', currentLanguage);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+      const res = await fetch('/transcribe-reference', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      const data = await readJsonOrThrow(res);
+
+      refTextEl.value = data.transcript || '';
+      setStatus(statusTranscribe, 'ok', '✓ Transcription ajoutée');
+    } catch (err) {
+      const msg = err.name === 'AbortError'
+        ? 'Transcription trop longue. Essayez un clip plus court.'
+        : err.message;
+      setStatus(statusTranscribe, 'err', '✕ ' + msg);
+    } finally {
+      btnTranscribe.disabled = false;
+    }
+  });
+
+  btnSaveVoice.addEventListener('click', async () => {
+    if (!audioRefEl.files[0]) {
+      setStatus(statusLibrary, 'err', '⚠ Choisissez un nouveau fichier audio avant de sauvegarder.');
+      return;
+    }
+    if (!refTextEl.value.trim()) {
+      setStatus(statusLibrary, 'err', '⚠ Transcription requise avant de sauvegarder cette voix.');
+      return;
+    }
+
+    const defaultName = audioRefEl.files[0].name.replace(/\.[^.]+$/, '');
+    const name = window.prompt('Nom de la voix à sauvegarder', defaultName);
+    if (name === null) return;
+
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setStatus(statusLibrary, 'err', '⚠ Nom de voix requis.');
+      return;
+    }
+
+    btnSaveVoice.disabled = true;
+    setStatus(statusLibrary, 'loading', 'Sauvegarde de la voix en cours…', true);
+
+    try {
+      const formData = new FormData();
+      formData.append('name', cleanName);
+      formData.append('ref_text', refTextEl.value.trim());
+      formData.append('audio_reference', audioRefEl.files[0]);
+
+      const res = await fetch('/voice-library', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await readJsonOrThrow(res);
+
+      await loadVoiceLibrary(data.voice.id);
+      setStatus(statusLibrary, 'ok', '✓ Voix sauvegardée');
+    } catch (err) {
+      setStatus(statusLibrary, 'err', '✗ ' + err.message);
+    } finally {
+      btnSaveVoice.disabled = false;
+    }
+  });
+
+  btnRegenScript.addEventListener('click', () => {
+    scriptSection.style.display = 'none';
+    inputSection.style.display = 'block';
+    setSteps(1);
+    setStatus(statusScript, '', '');
+    generateScript();
+  });
+
+  btnGenDirection.addEventListener('click', async () => {
+    const scenario = scenarioEl.value.trim();
+    const script = scriptOutput.value.trim();
+
+    if (!scenario && !script) {
+      setStatus(statusDirection, 'err', '⚠ Scénario ou script requis.');
+      return;
+    }
+
+    btnGenDirection.disabled = true;
+    setStatus(statusDirection, 'loading', 'Direction en cours…', true);
+
+    try {
+      const res = await fetch('/generate-direction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario, script, language: currentLanguage })
+      });
+      const data = await readJsonOrThrow(res);
+
+      voiceDirectionEl.value = data.direction || '';
+      setStatus(statusDirection, 'ok', '✓ Direction ajoutée');
+    } catch (err) {
+      setStatus(statusDirection, 'err', '✕ ' + err.message);
+    } finally {
+      btnGenDirection.disabled = false;
+    }
+  });
+
+  // ── COPY SCRIPT ──
+  btnCopy.addEventListener('click', () => {
+    navigator.clipboard.writeText(scriptOutput.value).then(() => {
+      btnCopy.textContent = '✓ Copié!';
+      setTimeout(() => { btnCopy.textContent = 'Copier le script'; }, 2000);
+    });
+  });
+
+  // ── GENERATE AUDIO ──
+  btnGenAudio.addEventListener('click', async () => {
+    const script = scriptOutput.value.trim();
+    if (!script) {
+      setStatus(statusAudio, 'err', '⚠ Le script est vide.');
+      return;
+    }
+    if (!hasReferenceAudio()) {
+      setStatus(statusAudio, 'err', '⚠ Fichier audio de référence manquant.');
+      return;
+    }
+    if (!refTextEl.value.trim()) {
+      setStatus(statusAudio, 'err', '⚠ Transcription exacte de la voix de référence manquante.');
+      return;
+    }
+
+    btnGenAudio.disabled = true;
+    btnRegenScript.disabled = true;
+    setStatus(statusAudio, 'loading', 'Génération audio Qwen en cours…', true);
+    setOnAir(true);
+    setSteps(3);
+
+    try {
+      const formData = new FormData();
+      formData.append('script', script);
+      formData.append('ref_text', refTextEl.value.trim());
+      formData.append('voice_direction', voiceDirectionEl.value.trim());
+      formData.append('language', currentLanguage);
+      if (audioRefEl.files[0]) {
+        formData.append('audio_reference', audioRefEl.files[0]);
+      } else {
+        formData.append('voice_library_id', selectedLibraryVoiceId);
+      }
+
+      const res = await fetch('/generate-audio', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        await readJsonOrThrow(res);
+      }
+
+      const blob = await res.blob();
+      generatedBlob = blob;
+
+      setStatus(statusAudio, 'ok', '✓ Audio généré avec succès');
+      setOnAir(false);
+      downloadGeneratedAudio();
+
+      scriptSection.style.display = 'none';
+      downloadSection.style.display = 'block';
+
+    } catch (err) {
+      setStatus(statusAudio, 'err', '✗ ' + err.message);
+      setOnAir(false);
+      setSteps(2);
+    } finally {
+      btnGenAudio.disabled = false;
+      btnRegenScript.disabled = false;
+    }
+  });
+
+  // ── DOWNLOAD ──
+  btnDownload.addEventListener('click', () => {
+    downloadGeneratedAudio();
+  });
+
+  // ── BACK TO SCRIPT ──
+  btnBackScript.addEventListener('click', () => {
+    downloadSection.style.display = 'none';
+    inputSection.style.display = 'none';
+    scriptSection.style.display = 'block';
+    setSteps(2);
+    setOnAir(false);
+    scriptOutput.focus();
+  });
+
+  // ── NEW GENERATION ──
+  btnNew.addEventListener('click', () => {
+    stopVoicePreview();
+    resetMicMeter();
+    stopMicTracks();
+    micRecorder = null;
+    micChunks = [];
+    micIsStopping = false;
+    btnMicTest.classList.remove('btn-recording');
+    btnMicTest.textContent = '🎙 Micro dictée';
+    scenarioEl.value = '';
+    scriptOutput.value = '';
+    voiceDirectionEl.value = '';
+    refTextEl.value = '';
+    fileNameEl.textContent = '';
+    audioRefEl.value = '';
+    selectedLibraryVoiceId = '';
+    voiceLibraryEl.value = '';
+    generatedBlob = null;
+    setStatus(statusScript, '', '');
+    setStatus(statusMic, '', '');
+    setStatus(statusTranscribe, '', '');
+    setStatus(statusLibrary, '', '');
+    setStatus(statusDirection, '', '');
+    setStatus(statusAudio, '', '');
+    setSteps(1);
+    downloadSection.style.display = 'none';
+    scriptSection.style.display = 'none';
+    inputSection.style.display = 'block';
+  });
+
+  window.addEventListener('beforeunload', () => {
+    resetMicMeter();
+    stopMicTracks();
+  });
+
+  setLanguage('fr');
+  loadVoiceLibrary();
+</script>
+</body>
+</html>
