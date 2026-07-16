@@ -1,5 +1,7 @@
 # walla-gen
 
+![walla-gen interface](walla-gen.png)
+
 > **Language note:** The source code, user interface, status messages, and most internal documentation are written in French. The program can generate and clone speech in either Quebec French or English.
 
 walla-gen is a local web application for script generation and voice cloning in Quebec French or English. It uses Anthropic to create scripts and performance directions, and Replicate to transcribe reference audio and generate WAV files.
