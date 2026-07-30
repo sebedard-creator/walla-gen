@@ -1,5 +1,22 @@
 # Changelog — walla-gen
 
+## 2026-07-22
+
+### Added
+
+- Pro Tools walla workflow based on `pt_api` 1.4.0 and its new read-only `get_timeline_clip_groups()` method.
+- Clip Group validation for labels in the compact `F|A F|H scénario` format, including track, duration and compatible-library-voice checks.
+- Automatic random selection of a matching saved voice, walla-oriented script generation, automatic performance direction, and one TTS render per valid Clip Group.
+- PTX session generation from a prepared `pt_api` template (empty timeline, retained imported prototype), with source positions preserved, a self-contained `Audio Files` folder, and `WALLA_MANIFEST.json`.
+- Strict BWF WAV rendering through configurable `ffmpeg`, validated against `pt_api` before session construction.
+- Browser controls to inspect the PTX plan and download the final session ZIP.
+
+### Changed
+
+- `.env.example` now documents `PT_API_PATH`, `FFMPEG_EXECUTABLE`, `WALLA_SLOT_MAX_SECONDS` and `WALLA_TEMPLATE_PATH`.
+- README and architecture documentation describe the template contract and walla delivery workflow.
+- The voice selector marks saved voices used successfully during the current page session; the marker intentionally resets after a refresh.
+
 ## 2026-07-16
 
 ### Ajouté

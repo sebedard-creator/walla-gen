@@ -11,6 +11,9 @@ import mimetypes
 import shutil
 import logging
 import sys
+import secrets
+import struct
+import subprocess
 from datetime import datetime
 from collections.abc import Iterable
 from html import escape
@@ -45,6 +48,34 @@ CACHE_DEBUG_FILES = (
     'last-generation-debug.txt',
     'last-transcription-debug.txt'
 )
+WALLA_SLOT_MAX_SECONDS = float(os.getenv('WALLA_SLOT_MAX_SECONDS', '120'))
+DEFAULT_WALLA_TEMPLATE_PATH = os.getenv('WALLA_TEMPLATE_PATH', 'walla_template.ptx')
+
+
+def get_pt_api_module():
+    """Load the local pt_api checkout without making its path machine-specific."""
+    configured_path = (os.getenv('PT_API_PATH') or '').strip()
+    candidates = []
+    if configured_path:
+        candidates.append(resolve_app_path(configured_path))
+    candidates.append(os.path.abspath(os.path.join(app.root_path, '..', 'pt_api')))
+
+    for candidate in candidates:
+        if os.path.isfile(os.path.join(candidate, 'pt_api.py')) and candidate not in sys.path:
+            sys.path.insert(0, candidate)
+
+    try:
+        import pt_api
+    except ImportError as exc:
+        raise RuntimeError(
+            "pt_api est introuvable. Installez-le dans l'environnement Python ou configurez PT_API_PATH."
+        ) from exc
+
+    if not hasattr(pt_api.ProToolsSession, 'get_timeline_clip_groups'):
+        raise RuntimeError(
+            "pt_api 1.4.0 ou une version plus récente est requise pour lire les Clip Groups."
+        )
+    return pt_api
 
 
 def ensure_voice_library():
@@ -225,6 +256,161 @@ def prune_missing_voice_library_items():
     return kept
 
 
+def normalized_label_token(value):
+    value = unicodedata.normalize('NFD', str(value or ''))
+    value = ''.join(char for char in value if not unicodedata.combining(char))
+    return re.sub(r'[^A-Z0-9]+', '', value.upper())
+
+
+def parse_walla_language(value):
+    token = normalized_label_token(value)
+    if token in ('FR', 'FRA', 'FRAN', 'FRENCH', 'FRANCAIS', 'FRANCAISE'):
+        return 'fr'
+    if token in ('EN', 'ENG', 'ENGLISH', 'ANGLAIS', 'ANGLAISE'):
+        return 'en'
+    return None
+
+
+def parse_walla_gender(value):
+    token = normalized_label_token(value)
+    if token in ('F', 'FEMALE', 'FEMME', 'FEMININ', 'WOMAN'):
+        return 'female'
+    if token in ('M', 'MALE', 'HOMME', 'MASCULIN', 'MAN'):
+        return 'male'
+    return None
+
+
+def parse_walla_slot_name(group_name):
+    """Parse compact Clip Group labels: ``F F scénario`` / ``A H scenario``."""
+    parts = str(group_name or '').strip().split(maxsplit=2)
+    if len(parts) != 3:
+        raise ValueError(
+            "Le nom doit suivre le format « F F scénario », « F H scénario », « A F scenario » ou « A H scenario »."
+        )
+
+    language = {'F': 'fr', 'A': 'en'}.get(normalized_label_token(parts[0]))
+    gender = {'F': 'female', 'H': 'male'}.get(normalized_label_token(parts[1]))
+    scenario = parts[2].strip().strip('"\'«»“”').strip()
+    if not language:
+        raise ValueError("Le premier code doit être F (français) ou A (anglais).")
+    if not gender:
+        raise ValueError("Le deuxième code doit être F (female) ou H (homme/male).")
+    if not scenario:
+        raise ValueError("Le scénario après les deux codes est requis.")
+    return {'language': language, 'gender': gender, 'scenario': scenario}
+
+
+def voice_walla_metadata(voice):
+    """Read optional future metadata, then fall back to the established name prefix."""
+    language = normalize_language(voice.get('language')) if voice.get('language') else None
+    gender = parse_walla_gender(voice.get('gender')) if voice.get('gender') else None
+    name = (voice.get('name') or '').strip()
+
+    parts = re.split(r'\s*(?:\||[-–—]|:)\s*', name, maxsplit=2)
+    if len(parts) >= 2:
+        language = language or parse_walla_language(parts[0])
+        gender = gender or parse_walla_gender(parts[1])
+
+    # Accept concise names such as "FRAN Female - Marie" too.
+    if not language or not gender:
+        match = re.match(
+            r'^\s*(FRAN(?:CAIS(?:E)?)?|FR|ENG(?:LISH)?|EN|ANGLAIS(?:E)?)\b[\s_\-:|]*'
+            r'(FEMALE|FEMME|F|MALE|HOMME|M)\b',
+            name,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            language = language or parse_walla_language(match.group(1))
+            gender = gender or parse_walla_gender(match.group(2))
+
+    return {'language': language, 'gender': gender}
+
+
+def walla_voice_candidates(language, gender):
+    candidates = []
+    for voice in prune_missing_voice_library_items():
+        metadata = voice_walla_metadata(voice)
+        language_matches = metadata['language'] in (None, language)
+        gender_matches = metadata['gender'] == gender
+        if language_matches and gender_matches:
+            candidates.append(voice)
+    return candidates
+
+
+def make_walla_slot_preview(group):
+    parsed = parse_walla_slot_name(group['group_name'])
+    length_samples = int(group['length_samples'])
+    if length_samples <= 0:
+        raise ValueError("La durée du Clip Group doit être supérieure à zéro.")
+    duration_seconds = length_samples / 48_000
+    if duration_seconds > WALLA_SLOT_MAX_SECONDS:
+        raise ValueError(
+            f"Le Clip Group dure {duration_seconds:.1f} s; la limite configurée est {WALLA_SLOT_MAX_SECONDS:.0f} s."
+        )
+    candidates = walla_voice_candidates(parsed['language'], parsed['gender'])
+    if not candidates:
+        language_label = 'FRAN' if parsed['language'] == 'fr' else 'ENG'
+        raise ValueError(
+            f"Aucune voix de librairie compatible ({language_label} / {parsed['gender']}). "
+            "Nommez les voix, par exemple, « FRAN - Female - Marie ».")
+    return {
+        **group,
+        **parsed,
+        'duration_seconds': round(duration_seconds, 3),
+        'candidate_voice_count': len(candidates),
+        'candidate_voice_ids': [voice['id'] for voice in candidates],
+    }
+
+
+def inspect_walla_slots(session_path, template_path=None):
+    pt_api = get_pt_api_module()
+    session = pt_api.ProToolsSession(session_path)
+    if session.sample_rate != 48_000:
+        raise ValueError("La session qui contient les Clip Groups doit être à 48 kHz.")
+
+    template_tracks = []
+    if template_path:
+        template = pt_api.ProToolsSession(template_path)
+        if template.sample_rate != 48_000:
+            raise ValueError("La template PTX doit être à 48 kHz.")
+        template_tracks = template.get_tracks()
+        try:
+            # pt_api 1.4.0 has no public template-preflight method yet. Reuse
+            # its read-only validator here so this fails before any billable
+            # script or TTS request is made.
+            template._validated_audio_import_template()
+        except ValueError as exc:
+            raise ValueError(
+                "La template PTX n'est pas prête pour l'import audio automatique : "
+                f"{exc} Créez-la selon les instructions affichées dans l'interface."
+            ) from exc
+
+    slots = []
+    errors = []
+    for group in session.get_timeline_clip_groups():
+        try:
+            slot = make_walla_slot_preview(group)
+            if template_tracks and slot['track'] not in template_tracks:
+                raise ValueError(
+                    f"La piste « {slot['track']} » n'existe pas dans la template PTX."
+                )
+            slots.append(slot)
+        except ValueError as exc:
+            errors.append({
+                'group_id': group.get('group_id'),
+                'group_name': group.get('group_name', ''),
+                'track': group.get('track', ''),
+                'error': str(exc),
+            })
+
+    return {
+        'slots': slots,
+        'errors': errors,
+        'template_tracks': template_tracks,
+        'sample_rate': session.sample_rate,
+    }
+
+
 def wait_for_replicate_slot():
     global last_replicate_call
     spacing = float(os.getenv('REPLICATE_MIN_SECONDS_BETWEEN_CALLS', '12'))
@@ -273,6 +459,7 @@ Règles :
 - Tu peux employer quelques graphies orales québécoises si elles aident la prononciation.
 - Évite la caricature, mais sois plus affirmé que du français standard.
 - Évite absolument les expressions, le vocabulaire et la cadence typiques de France.
+- N'utilise jamais le mot « Yo », ni comme salutation ni ailleurs dans le texte.
 - Ne donne aucune explication, aucun titre, aucune note.
 - Retourne uniquement le texte qui doit être lu par le TTS.
 
@@ -403,6 +590,359 @@ def run_transcription(replicate_client, model, ref_audio, language='fr'):
             "prompt": prompt
         }
     )
+
+
+def generate_walla_script(scenario, duration_seconds, language):
+    language = normalize_language(language)
+    client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+    duration_seconds = max(1, round(float(duration_seconds), 1))
+    if language == 'en':
+        prompt = f"""Write the spoken lines of one person in a natural background conversation.
+
+Scenario: {scenario}
+Target duration: approximately {duration_seconds} seconds.
+
+Rules:
+- Write only natural spoken English for a single voice.
+- It must sound like believable walla/background dialogue, not a narrator or announcement.
+- Use short, speakable sentences and natural punctuation.
+- No speaker labels, stage directions, quotation marks, title, notes, or explanation.
+- Return only the words to be spoken."""
+    else:
+        prompt = f"""Écris les répliques d'une seule personne dans une conversation d'ambiance naturelle.
+
+Scénario : {scenario}
+Durée visée : environ {duration_seconds} secondes.
+
+Règles :
+- Écris uniquement un français québécois parlé, naturel et crédible, pour une seule voix.
+- Le résultat doit sonner comme du walla / une conversation d'arrière-plan, jamais comme une narration ou une annonce.
+- Utilise des phrases courtes, faciles à prononcer et une ponctuation naturelle.
+- Aucune étiquette de personnage, didascalie, guillemet, titre, note ou explication.
+- Retourne uniquement les mots à prononcer."""
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=800,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return text_from_anthropic_message(message)
+
+
+def generate_walla_direction(scenario, script, language):
+    language = normalize_language(language)
+    client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+    if language == 'en':
+        prompt = f"""Write one short performance direction for background-dialogue TTS.
+
+Constraints: maximum 18 words; describe only tone, pace and intensity; no list; no metaphor; mention natural English.
+Scenario: {scenario}
+Script: {script}
+Return only the direction."""
+    else:
+        prompt = f"""Écris une micro-direction de jeu pour un TTS de conversation d'ambiance.
+
+Contraintes : maximum 18 mots; décris seulement le ton, le débit et l'intensité; pas de liste ni métaphore; mentionne « québécois naturel ».
+Scénario : {scenario}
+Texte : {script}
+Retourne uniquement la direction."""
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=80,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return text_from_anthropic_message(message)
+
+
+def generate_audio_from_library_voice(script, library_voice, voice_direction, language):
+    """Generate one WAV from a saved reference voice and return its cache path."""
+    ref_text = (library_voice.get('transcript') or '').strip()
+    if not ref_text:
+        raise ValueError(f"La voix « {library_voice.get('name', '')} » n'a pas de transcription.")
+
+    model = os.getenv(
+        'REPLICATE_TTS_MODEL',
+        'qwen/qwen3-tts:0b366549c7541af95a69454651f4ebf02c699036841cd20b78b9e2a26b4b2750'
+    )
+    ref_path = voice_audio_path(library_voice)
+    tts_script = strip_inline_stage_directions(prepare_quebec_tts_script(script, language))
+    model_ref_text = normalize_tts_text(ref_text)
+    log_generation_payload(model_ref_text, tts_script, voice_direction)
+    replicate_client = replicate.Client(api_token=os.getenv('REPLICATE_API_KEY'))
+    with open(ref_path, 'rb') as ref_audio:
+        model_input = build_tts_input(
+            model, tts_script, ref_audio, model_ref_text, voice_direction, language
+        )
+        wait_for_replicate_slot()
+        output = replicate_client.run(model, input=model_input)
+
+    response = requests.get(str(output), timeout=120)
+    response.raise_for_status()
+    generated = named_cache_file('output', '.wav')
+    generated.write(response.content)
+    generated.close()
+    return generated.name
+
+
+def write_riff_chunk(stream, chunk_id, payload):
+    stream.write(chunk_id)
+    stream.write(struct.pack('<I', len(payload)))
+    stream.write(payload)
+    if len(payload) % 2:
+        stream.write(b'\x00')
+
+
+def render_pt_api_wave(source_path, destination_path, time_reference):
+    """Render arbitrary TTS output as the strict BWF WAV expected by pt_api."""
+    if not 0 <= int(time_reference) <= 0xFFFFFFFF:
+        raise ValueError("La position audio est hors des limites BWF prises en charge.")
+    raw_path = destination_path + '.f32le'
+    ffmpeg = os.getenv('FFMPEG_EXECUTABLE', 'ffmpeg')
+    try:
+        completed = subprocess.run(
+            [
+                ffmpeg, '-y', '-v', 'error', '-i', source_path,
+                '-map', '0:a:0', '-ac', '1', '-ar', '48000', '-f', 'f32le', raw_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise RuntimeError("ffmpeg est requis pour préparer les WAV Pro Tools.") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or 'erreur inconnue').strip()
+        raise RuntimeError(f"Conversion audio ffmpeg impossible : {detail[:300]}")
+
+    try:
+        data_size = os.path.getsize(raw_path)
+        if data_size == 0 or data_size % 4:
+            raise ValueError("Le rendu audio converti est vide ou invalide.")
+        sample_count = data_size // 4
+        if sample_count > 0xFFFFFF:
+            raise ValueError("Le rendu audio dépasse la durée maximale prise en charge par pt_api.")
+
+        now = datetime.now()
+        originator = b'walla-gen'.ljust(32, b'\x00')
+        originator_ref = ('WALLA-' + uuid.uuid4().hex[:26]).encode('ascii').ljust(32, b'\x00')
+        basic_umid = ('WALLA-GEN-' + uuid.uuid4().hex[:22]).encode('ascii').ljust(32, b'\x00')
+        bext = (
+            b'walla-gen generated dialogue'.ljust(256, b'\x00')
+            + originator
+            + originator_ref
+            + now.strftime('%Y-%m-%d').encode('ascii')
+            + now.strftime('%H:%M:%S').encode('ascii')
+            + struct.pack('<Q', int(time_reference))
+            + struct.pack('<H', 1)
+            + basic_umid
+            + (b'\x00' * 32)
+        )
+        fmt = (
+            struct.pack('<HHIIHHH', 0xFFFE, 1, 48000, 192000, 4, 32, 22)
+            + struct.pack('<HI', 32, 0x0004)
+            + bytes.fromhex('0300000000001000800000aa00389b71')
+        )
+        riff_size = (
+            4
+            + 8 + len(bext) + (len(bext) % 2)
+            + 8 + len(fmt) + (len(fmt) % 2)
+            + 8 + 4
+            + 8 + data_size + (data_size % 2)
+        )
+        with open(destination_path, 'wb') as destination, open(raw_path, 'rb') as raw:
+            destination.write(b'RIFF')
+            destination.write(struct.pack('<I', riff_size))
+            destination.write(b'WAVE')
+            write_riff_chunk(destination, b'bext', bext)
+            write_riff_chunk(destination, b'fmt ', fmt)
+            write_riff_chunk(destination, b'fact', struct.pack('<I', sample_count))
+            destination.write(b'data')
+            destination.write(struct.pack('<I', data_size))
+            shutil.copyfileobj(raw, destination, length=1024 * 1024)
+            if data_size % 2:
+                destination.write(b'\x00')
+    finally:
+        if os.path.exists(raw_path):
+            os.unlink(raw_path)
+
+
+def safe_walla_name(value):
+    value = unicodedata.normalize('NFD', str(value or ''))
+    value = ''.join(char for char in value if not unicodedata.combining(char))
+    value = re.sub(r'[^A-Za-z0-9_-]+', '_', value).strip('_')
+    return value[:80] or 'walla_gen'
+
+
+def save_uploaded_ptx(upload, label):
+    if not upload or not upload.filename:
+        raise ValueError(f"Le fichier PTX {label} est requis.")
+    if os.path.splitext(upload.filename)[1].lower() != '.ptx':
+        raise ValueError(f"Le fichier {label} doit avoir l'extension .ptx.")
+    stored = named_cache_file('input', '.ptx')
+    upload.save(stored.name)
+    stored.close()
+    return stored.name
+
+
+def resolve_walla_template(upload=None):
+    """Use an explicit upload only when supplied; otherwise use the project template."""
+    if upload and upload.filename:
+        return save_uploaded_ptx(upload, 'template'), True
+    template_path = resolve_app_path(DEFAULT_WALLA_TEMPLATE_PATH)
+    if not os.path.isfile(template_path):
+        raise FileNotFoundError(
+            "La template walla intégrée est introuvable : " + template_path
+        )
+    if os.path.splitext(template_path)[1].lower() != '.ptx':
+        raise ValueError("La template walla intégrée doit avoir l'extension .ptx.")
+    return template_path, False
+
+
+@app.route('/walla/inspect', methods=['POST'])
+def inspect_walla_session():
+    session_path = None
+    template_path = None
+    cleanup_template = False
+    try:
+        session_path = save_uploaded_ptx(request.files.get('session_ptx'), 'avec les Clip Groups')
+        template_path, cleanup_template = resolve_walla_template(request.files.get('template_ptx'))
+        return jsonify(inspect_walla_slots(session_path, template_path))
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        return jsonify({'error': f"Lecture du PTX impossible : {str(exc)}"}), 500
+    finally:
+        if session_path and os.path.exists(session_path):
+            os.unlink(session_path)
+        if cleanup_template and template_path and os.path.exists(template_path):
+            os.unlink(template_path)
+
+
+@app.route('/walla/generate-session', methods=['POST'])
+def generate_walla_session():
+    session_path = None
+    template_path = None
+    cleanup_template = False
+    job_directory = None
+    output_directory = None
+    published = False
+    try:
+        session_path = save_uploaded_ptx(request.files.get('session_ptx'), 'avec les Clip Groups')
+        template_path, cleanup_template = resolve_walla_template(request.files.get('template_ptx'))
+        inspection = inspect_walla_slots(session_path, template_path)
+        if inspection['errors']:
+            details = '; '.join(
+                f"{item['group_name'] or 'Clip Group'} : {item['error']}"
+                for item in inspection['errors']
+            )
+            raise ValueError(f"Les Clip Groups doivent être corrigés avant la génération : {details}")
+        if not inspection['slots']:
+            raise ValueError("Aucun Clip Group walla valide n'a été trouvé dans la session.")
+
+        pt_api = get_pt_api_module()
+        session_name = safe_walla_name(request.form.get('session_name') or 'walla_gen')
+        job_directory = tempfile.mkdtemp(prefix='walla_job_', dir=CACHE_OUTPUT_DIR)
+        render_directory = os.path.join(job_directory, 'renders')
+        os.makedirs(render_directory)
+        output_directory = os.path.join(
+            CACHE_OUTPUT_DIR, f"{session_name}_{uuid.uuid4().hex[:10]}"
+        )
+
+        clip_specs = []
+        manifest = []
+        voices_by_id = {voice['id']: voice for voice in prune_missing_voice_library_items()}
+        for position, slot in enumerate(inspection['slots'], start=1):
+            candidates = [
+                voices_by_id[voice_id]
+                for voice_id in slot['candidate_voice_ids']
+                if voice_id in voices_by_id
+            ]
+            if not candidates:
+                raise ValueError(
+                    f"La librairie a changé : aucune voix compatible pour « {slot['group_name']} »."
+                )
+            voice = secrets.choice(candidates)
+            script = generate_walla_script(
+                slot['scenario'], slot['duration_seconds'], slot['language']
+            )
+            direction = generate_walla_direction(slot['scenario'], script, slot['language'])
+            generated_audio = generate_audio_from_library_voice(
+                script, voice, direction, slot['language']
+            )
+            clip_stem = f"WALLA_{position:03d}_{safe_walla_name(slot['scenario'])}"
+            compatible_audio = os.path.join(render_directory, f"{clip_stem}.wav")
+            render_pt_api_wave(generated_audio, compatible_audio, slot['start_samples'])
+            clip_specs.append({
+                'audio_path': compatible_audio,
+                'track_name': slot['track'],
+                'physical_filename': f"{clip_stem}.wav",
+                'clip_name': clip_stem,
+                'placement_start_samples': slot['start_samples'],
+            })
+            manifest.append({
+                'group_id': slot['group_id'],
+                'group_name': slot['group_name'],
+                'track': slot['track'],
+                'start_samples': slot['start_samples'],
+                'length_samples': slot['length_samples'],
+                'duration_seconds': slot['duration_seconds'],
+                'language': slot['language'],
+                'gender': slot['gender'],
+                'scenario': slot['scenario'],
+                'voice_id': voice['id'],
+                'voice_name': voice['name'],
+                'script': script,
+                'direction': direction,
+                'audio_filename': f"{clip_stem}.wav",
+            })
+
+        build_result = pt_api.build_audio_session(
+            template_path, clip_specs, output_directory, session_name=session_name
+        )
+        with open(os.path.join(output_directory, 'WALLA_MANIFEST.json'), 'w', encoding='utf-8') as file:
+            json.dump(
+                {
+                    'created_at': datetime.now().isoformat(timespec='seconds'),
+                    'pt_api_version': getattr(pt_api, '__version__', 'unknown'),
+                    'build_result': build_result,
+                    'slots': manifest,
+                },
+                file,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        archive_base = os.path.join(CACHE_OUTPUT_DIR, f"{session_name}_{uuid.uuid4().hex[:10]}")
+        archive_path = shutil.make_archive(
+            archive_base,
+            'zip',
+            root_dir=os.path.dirname(output_directory),
+            base_dir=os.path.basename(output_directory),
+        )
+        published = True
+        response = send_file(
+            archive_path,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f"{session_name}.zip",
+        )
+        response.headers['X-Walla-Slot-Count'] = str(len(manifest))
+        return response
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({'error': str(exc)}), 400
+    except replicate.exceptions.ReplicateError as exc:
+        return jsonify({'error': f"Erreur Replicate : {str(exc)}"}), 500
+    except Exception as exc:
+        app.logger.exception('Génération walla PTX impossible')
+        return jsonify({'error': f"Génération du PTX impossible : {str(exc)}"}), 500
+    finally:
+        if session_path and os.path.exists(session_path):
+            os.unlink(session_path)
+        if cleanup_template and template_path and os.path.exists(template_path):
+            os.unlink(template_path)
+        if job_directory and os.path.isdir(job_directory):
+            shutil.rmtree(job_directory, ignore_errors=True)
+        if output_directory and not published and os.path.isdir(output_directory):
+            shutil.rmtree(output_directory, ignore_errors=True)
 
 
 @app.route('/')
@@ -552,40 +1092,48 @@ def generate_script():
         client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
         if language == 'en':
-            prompt = f"""You are an experienced scriptwriter for radio and television.
+            prompt = f"""You write natural walla dialogue for film and television.
 
 Primary objective: the text will be read by a text-to-speech / voice-cloning system.
 It must therefore be natural, concise, easy to speak, and written in clear English.
 
-Generate a natural English script for the following scenario:
+Generate only the spoken lines of one person for the following situation:
 "{scenario}"
 
-The script should last approximately {duration} seconds when read aloud at a natural broadcast pace.
-For voice cloning, keep it concise: short sentences, clear punctuation, and natural rhythm.
+The dialogue should last approximately {duration} seconds when read aloud at a natural conversational pace.
+For voice cloning, keep it concise: short sentences, clear punctuation, natural rhythm, and plausible conversational replies.
 
 Strict rules:
 - Write only in English.
 - Use natural spoken English, not translated-sounding French syntax.
+- Return dialogue only: spoken words or replies from one person.
+- Never describe the setting, actions, emotions, plot, or other characters.
+- Never write narration, a scenario summary, scene directions, or explanatory prose.
+- Do not add speaker names or labels; the voice should sound as if it is speaking to someone naturally.
 - Do not include stage directions, titles, line numbers, notes, or parenthetical instructions.
 - Return ONLY the script text, nothing else."""
         else:
-            prompt = f"""Tu es un rédacteur chevronné pour la radio et la télévision québécoise.
+            prompt = f"""Tu écris du dialogue de walla naturel pour le cinéma et la télévision québécoise.
 
 Objectif prioritaire : le texte sera lu ensuite par un système de synthèse vocale.
 Il doit donc aider à produire une diction et une prosodie clairement québécoises,
 avec un accent québécois naturel et crédible, et non un accent français de France.
 
-Génère un script naturel et authentique en français québécois pour le scénario suivant :
+Génère uniquement les répliques parlées d'une seule personne pour la situation suivante :
 "{scenario}"
 
-Le script doit durer approximativement {duration} secondes lorsque lu à voix haute au rythme naturel d'un lecteur ou d'une lectrice de nouvelles québécois(e).
-Pour le clonage vocal, reste concis : phrases courtes, ponctuation claire, débit naturel.
+Le dialogue doit durer approximativement {duration} secondes lorsque lu à voix haute au rythme naturel d'une conversation.
+Pour le clonage vocal, reste concis : phrases courtes, ponctuation claire, débit naturel et réponses plausibles à une personne hors champ.
 
 Règles strictes :
 - Utilise un vocabulaire, des expressions et des tournures authentiquement québécoises
 - Évite les formulations, le vocabulaire et le rythme typiques du français de France
 - Marque subtilement l'oralité québécoise quand c'est naturel, sans tomber dans la caricature ou le joual forcé
-- Le ton doit sonner naturel, comme on entend à la radio ou à la télé québécoise
+- Retourne uniquement du dialogue : les paroles ou répliques d'une seule personne
+- Ne décris jamais le lieu, les actions, les émotions, l'intrigue ou les autres personnages
+- N'écris jamais de narration, résumé de scénario, description de scène ou texte explicatif
+- N'ajoute pas de nom de personnage ni d'étiquette de locuteur : la voix doit sonner comme si elle répondait naturellement à quelqu'un
+- N'utilise jamais le mot « Yo », ni comme salutation ni ailleurs dans le script
 - N'inclus aucune didascalie, aucun titre, aucun numéro de ligne, aucune note entre parenthèses
 - Retourne UNIQUEMENT le texte du script, rien d'autre"""
 

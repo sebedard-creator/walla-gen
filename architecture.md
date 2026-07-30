@@ -1,6 +1,6 @@
 # Architecture — walla-gen
 
-État vérifié le 16 juillet 2026.
+État vérifié le 22 juillet 2026.
 
 ## Vue d'ensemble
 
@@ -24,8 +24,10 @@ Cette architecture évite deux processus concurrents qui modifieraient la même 
 - la capture micro avec `getUserMedia` et `MediaRecorder`;
 - les appels `fetch` vers Flask;
 - le filtrage client de la bibliothèque selon `FRAN` et `ENG`;
+- le marquage visuel en mémoire des voix de bibliothèque déjà utilisées durant la session de page;
 - la lecture préalable d'une voix;
 - la copie du script et le téléchargement du WAV.
+- le flux **Pro Tools · Walla automatique** : import du PTX portant les Clip Groups, utilisation de `walla_template.ptx`, vérification des slots et téléchargement de l'archive PTX finale.
 
 Les polices Google sont chargées depuis `fonts.googleapis.com`; l'application reste fonctionnelle sans elles grâce aux polices de repli.
 
@@ -38,6 +40,8 @@ Les polices Google sont chargées depuis `fonts.googleapis.com`; l'application r
 - la préparation du texte et des instructions Qwen3-TTS;
 - la persistance de la bibliothèque de voix;
 - la gestion du cache;
+- l'import local de `pt_api` 1.4.0, la lecture des occurrences de Clip Groups et la construction d'une session PTX depuis une template;
+- la conversion des sorties TTS avec `ffmpeg` en WAV BWF mono 48 kHz/float compatible avec le builder de `pt_api`;
 - le service HTTP/HTTPS et le téléchargement de l'autorité locale.
 
 ### Services externes
@@ -46,6 +50,8 @@ Les polices Google sont chargées depuis `fonts.googleapis.com`; l'application r
 - Replicate, modèle configurable par `REPLICATE_TRANSCRIBE_MODEL` : transcription.
 - Replicate, modèle configurable par `REPLICATE_TTS_MODEL` : clonage vocal Qwen3-TTS.
 - `requests` : téléchargement du fichier audio produit par l'URL retournée par Replicate.
+- `pt_api` 1.4.0 : lecture en seule lecture de `get_timeline_clip_groups()` et `build_audio_session()`.
+- `ffmpeg` : conversion/rééchantillonnage avant l'écriture BWF.
 
 ## Flux principaux
 
@@ -72,6 +78,13 @@ Les polices Google sont chargées depuis `fonts.googleapis.com`; l'application r
 5. Les appels Replicate sont espacés selon `REPLICATE_MIN_SECONDS_BETWEEN_CALLS`.
 6. Le WAV distant est téléchargé dans `cache/output/`, puis envoyé au navigateur.
 
+### Session walla Pro Tools
+
+1. `/walla/inspect` reçoit le PTX qui porte les Clip Groups et utilise la template définie par `WALLA_TEMPLATE_PATH` (par défaut `walla_template.ptx`). Il lit `get_timeline_clip_groups()`, valide le format compact `F|A F|H scénario`, trouve les voix compatibles, vérifie les pistes et appelle le validateur de template de `pt_api` sans modifier le PTX. Il ne fait aucun appel Anthropic/Replicate.
+2. `/walla/generate-session` refait cette validation avant toute dépense, choisit une voix compatible aléatoirement pour chaque slot, génère script, direction et TTS, puis convertit chaque rendu en BWF valide.
+3. `build_audio_session()` crée une nouvelle session depuis la template : chaque rendu vise la piste du Clip Group et sa position `start_samples`.
+4. Le serveur ajoute `WALLA_MANIFEST.json`, archive le dossier de session (PTX et `Audio Files`) puis retourne le ZIP. Les sessions et archives restent dans `cache/output/` jusqu'au nettoyage.
+
 ## Routes
 
 | Méthode | Route | Rôle |
@@ -87,6 +100,8 @@ Les polices Google sont chargées depuis `fonts.googleapis.com`; l'application r
 | POST | `/generate-direction` | Génère la direction de jeu. |
 | POST | `/transcribe-reference` | Transcrit une référence selon la langue choisie. |
 | POST | `/generate-audio` | Génère et retourne le WAV cloné. |
+| POST | `/walla/inspect` | Valide les Clip Groups et les voix compatibles, sans génération. |
+| POST | `/walla/generate-session` | Génère les voix et retourne un ZIP de session PTX autonome. |
 
 Le filtre `FRAN`/`ENG` n'est pas appliqué par `/voice-library`; la route retourne toutes les voix et `voiceMatchesLanguage()` filtre les options dans le navigateur.
 
@@ -97,6 +112,7 @@ Le filtre `FRAN`/`ENG` n'est pas appliqué par `/voice-library`; la route retour
 - Les entrées dont le fichier manque ou dont le chemin est invalide sont retirées de l'index lors du chargement de la bibliothèque.
 - L'index est écrit via `index.tmp`, puis remplacé atomiquement.
 - `cache/input/` contient les entrées temporaires et `cache/output/` les générations.
+- Les PTX envoyés, rendus intermédiaires, sessions PTX finales et ZIP walla sont temporaires : ils sont tous sous `cache/` et donc supprimés par **Clear Cache**.
 - Les diagnostics contiennent les dernières transcription et charge de génération; ils peuvent inclure le texte fourni par l'utilisateur.
 
 ## HTTPS

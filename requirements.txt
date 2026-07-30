@@ -4,3 +4,4 @@ replicate>=0.34.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 cryptography>=42.0.0
+pt_api @ git+https://github.com/sebedard-creator/pt_api.git@v1.4.0
