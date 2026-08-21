@@ -1,5 +1,7 @@
 # walla-gen
 
+**Version 2.0**
+
 ![walla-gen interface](walla-gen.png)
 
 > **Language note:** The source code, user interface, status messages, and most internal documentation are written in French. The program can generate and clone speech in either Quebec French or English.
@@ -11,22 +13,22 @@ walla-gen is a local web application for script generation and voice cloning in 
 - Generates Quebec French or English scripts with `claude-haiku-4-5-20251001`.
 - Automatically generates a short voice-performance direction.
 - Performs voice cloning with Qwen3-TTS through Replicate.
+- Gently cleans noisy reference audio in a temporary copy before cloning; saved library files are never modified.
+- Offers an optional Quebec-oriented text rewrite and a strengthened Quebec-accent instruction that explicitly rejects Metropolitan French prosody. Rewriting is disabled by default so the displayed script remains unchanged.
 - Transcribes reference files with `openai/gpt-4o-mini-transcribe` through Replicate.
 - Records audio from the browser microphone and transcribes it into the scenario field.
 - Maintains a local voice library containing a name, audio file, and exact transcript for each voice.
 - Plays saved voice references before generation.
+- Lets you correct a saved voice's transcript or permanently delete the voice and its audio after confirmation.
 - Marks each saved voice already used during the current browser session; these visual markers reset on page refresh or when the service is reopened.
 - Filters the voice library according to the selected script language:
   - French: voices whose names begin with `FRAN`, plus voices without either the `FRAN` or `ENG` prefix.
   - English: voices whose names begin with `ENG`, plus voices without either the `FRAN` or `ENG` prefix.
   - Prefix matching is case-insensitive and ignores leading whitespace.
+- Uses three clickable panels—Scenario, Script and Audio—so you can move freely through the workflow.
+- Uses a warm, low-glare interface palette intended to be more comfortable during long or late-night sessions.
+- Allows a running Qwen generation to be aborted from the Audio panel.
 - Automatically and manually downloads the generated WAV file.
-- Builds a self-contained Pro Tools session from Clip Groups through `pt_api` 1.4.0:
-  - reads every visible Clip Group placement, including repeated placements;
-  - interprets compact labels such as `F F Une femme discute avec son mari`;
-  - selects a compatible saved reference voice at random;
-  - generates walla dialogue and a performance direction for the group's duration;
-  - creates a PTX timeline at the same sample positions, with its `Audio Files` folder and a JSON manifest.
 - Clears temporary files without affecting the saved voice library.
 - Provides simultaneous HTTP and HTTPS access when HTTPS is configured.
 
@@ -37,8 +39,7 @@ walla-gen is a local web application for script generation and voice cloning in 
 - Anthropic for script and performance-direction generation.
 - Replicate for transcription and Qwen3-TTS.
 - `cryptography` for creating local HTTPS certificates with `setup_https.py`.
-- `pt_api` 1.4.0 for Pro Tools Clip Group inspection and template-based PTX creation.
-- `ffmpeg` for rendering generated audio to the strict BWF WAV format required by `pt_api`.
+- `ffmpeg` for gentle reference-audio cleanup before voice cloning.
 - PyManager as the startup manager on the current machine; direct startup is also supported.
 
 Azure Speech, CosyVoice, Chatterbox, and Whisper are no longer part of the pipeline.
@@ -54,13 +55,15 @@ Copy-Item .env.example .env
 
 At minimum, set `ANTHROPIC_API_KEY` and `REPLICATE_API_KEY` in `.env`.
 
-`pip install -r requirements.txt` installs the public `pt_api` v1.4.0 tag from GitHub. During local `pt_api` development, walla-gen prefers a sibling `../pt_api` checkout (the current machine uses `Y:\pt_api`) or the optional `PT_API_PATH` value in `.env`. `ffmpeg` must be available on `PATH`; set `FFMPEG_EXECUTABLE` when it is installed elsewhere.
+`ffmpeg` must be available on `PATH`; set `FFMPEG_EXECUTABLE` when it is installed elsewhere.
 
 The current `.env.example` values enable:
 
 - HTTP on port `5050`;
 - HTTPS on port `5051`;
-- the `certs/walla-server.crt` and `certs/walla-server.key` certificate files.
+- the `certs/walla-server.crt` and `certs/walla-server.key` certificate files;
+- exact script preservation with `QUEBEC_TTS_REWRITE=false`;
+- temporary reference-audio cleanup with `REFERENCE_AUDIO_CLEANUP=true`.
 
 ## Local HTTPS and microphone access
 
@@ -122,20 +125,12 @@ The user interface is in French. The main workflow is:
 4. Provide or generate the exact transcript of the reference audio.
 5. Generate and edit the script.
 6. Enter or automatically generate a voice-performance direction.
-7. Generate and download the WAV file.
+7. Keep or disable the reference cleanup option. In French, the strengthened Quebec-accent option is also enabled by default.
+8. Generate and download the WAV file. If Qwen gets stuck, open the **Audio** panel and select **Abort**.
+
+Reference cleanup creates a temporary mono 24 kHz WAV with mild noise reduction and level normalization. It does not overwrite uploaded files or anything in `voice_library/`. The Quebec-accent option is disabled automatically when English is selected.
 
 Scenario microphone dictation currently uses a French transcription prompt even when English is selected. Reference-audio transcription does respect the selected language.
-
-### Pro Tools walla workflow
-
-1. In the source Pro Tools session, create a Clip Group for each walla placement. Its position and duration are the target slot.
-2. Name each group with exactly three parts: `F F scénario` (French/female), `F H scénario` (French/male), `A F scenario` (English/female), or `A H scenario` (English/male). The remainder of the name is the scenario.
-3. Name saved reference voices with compatible labels, for example `FRAN - Female - Marie` and `ENG - Male - Alex`. Voices with no language label may match either language, but an explicit compatible sex label is required for automatic selection.
-4. Place the prepared template at `walla_template.ptx` in the project root (or configure `WALLA_TEMPLATE_PATH`). In **Pro Tools · Walla automatique**, select the source PTX, then use **Importer et vérifier les Clip Groups**. This is read-only and makes no API calls.
-5. Correct every reported issue, then start generation. The confirmation creates one billed text and audio generation per valid group.
-6. Download the ZIP file. It contains the new PTX, its required `Audio Files` folder, and `WALLA_MANIFEST.json` recording the selected voices, scripts, directions, and placements.
-
-The template is not a brand-new blank session. It must meet the current `pt_api` builder contract: a 48 kHz / 32-bit float session at the 23.976 frame-rate enum, existing uniquely named visible tracks, no visible or hidden timeline events, and exactly one Pro Tools-imported mono 48 kHz / 32-bit float prototype in its Clip List/media catalog. In Pro Tools, create the destination tracks, import a short compatible WAV, remove it from the timeline without using **Clear Unused**, and save the template. Each output track must have the exact same name as the track carrying its source Clip Group. The generated audio is placed at the Clip Group's `start_samples`; its spoken duration is targeted but not time-stretched or forcibly truncated.
 
 ## Local data
 

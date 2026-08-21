@@ -170,6 +170,34 @@
     .row { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; }
     .row .grow { flex: 1; min-width: 200px; }
 
+    .tts-options {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .tts-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      flex: 1 1 280px;
+      margin: 0;
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      cursor: pointer;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 12px;
+      letter-spacing: 0;
+      line-height: 1.35;
+      text-transform: none;
+    }
+    .tts-option input { margin-top: 2px; accent-color: var(--amber); }
+    .tts-option span { color: var(--text); }
+    .tts-option small { display: block; margin-top: 2px; color: var(--muted); }
+    .tts-option:has(input:disabled) { opacity: .45; cursor: not-allowed; }
+
     .voice-reference-row {
       align-items: flex-start;
       gap: 18px;
@@ -416,14 +444,19 @@
       flex: 1;
       text-align: center;
       padding: 8px 0;
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid var(--border);
+      cursor: pointer;
       font-family: 'IBM Plex Mono', monospace;
       font-size: 10px;
       letter-spacing: 1px;
       text-transform: uppercase;
       color: var(--muted);
-      border-bottom: 2px solid var(--border);
       transition: color .3s, border-color .3s;
     }
+    .step:hover { color: var(--amber-dim); }
+    .step:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
     .step.active { color: var(--amber); border-color: var(--amber); }
     .step.done { color: var(--green); border-color: var(--green); }
 
@@ -446,34 +479,6 @@
       letter-spacing: 1px;
     }
 
-    /* ── PRO TOOLS WALLA ── */
-    #walla-section { margin-top: 28px; }
-    .walla-help { color: var(--muted); margin-bottom: 14px; }
-    .walla-paused {
-      margin: 0 0 14px;
-      padding: 10px 12px;
-      border: 1px solid #ef9a9a;
-      border-radius: 8px;
-      background: var(--red-bg);
-      color: var(--red);
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 11px;
-    }
-    .walla-file { flex: 1; min-width: 250px; }
-    .walla-file input[type="file"] { width: 100%; color: var(--text); }
-    .walla-slots { margin-top: 14px; }
-    .walla-slot {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px 14px;
-      padding: 10px 0;
-      border-top: 1px solid var(--border);
-    }
-    .walla-slot:first-child { border-top: 0; }
-    .walla-slot strong { font-size: 13px; }
-    .walla-slot small { color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
-    .walla-slot .slot-error { color: var(--red); grid-column: 1 / -1; }
-
     /* ── FOOTER ── */
     footer {
       margin-top: 16px;
@@ -490,6 +495,123 @@
       text-decoration: none;
     }
     footer a:hover { color: var(--amber); }
+
+    /* ── VISUAL REFINEMENT ── */
+    :root {
+      --surface: #e5e0d0;
+      --surface-soft: #dad3bd;
+      --border: #beb59a;
+      --amber: #9a5a1e;
+      --amber-dim: #744015;
+      --green: #41684c;
+      --green-bg: #e5ecd9;
+      --red: #94382a;
+      --red-bg: #f2dfcf;
+      --text: #302c23;
+      --muted: #706957;
+      --white: #302c23;
+    }
+    html, body {
+      background: #bcb6a8;
+      color: var(--text);
+    }
+    body { padding: 28px; }
+    .shell {
+      background: #e5e0d0;
+      max-width: 920px;
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 18px 45px rgba(42, 35, 18, .25);
+    }
+    header {
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      padding-bottom: 18px;
+      border-bottom-width: 1px;
+    }
+    header h1 {
+      color: var(--text);
+      font-size: 21px;
+      letter-spacing: -.02em;
+    }
+    .app-version {
+      padding: 2px 7px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #ded6bf;
+      font-size: 10px;
+    }
+    header .sub { letter-spacing: .04em; }
+    .on-air { letter-spacing: .08em; }
+    .on-air.active .dot { box-shadow: 0 0 0 3px rgba(164,56,45,.14); }
+    .section-label { color: var(--muted); letter-spacing: .12em; margin: 0 0 8px 2px; }
+    .card { background: #ece7d7; border-radius: 10px; padding: 22px; margin-bottom: 16px; }
+    label { letter-spacing: .08em; }
+    textarea, input[type="number"], input[type="text"], select {
+      background: #faf6ea;
+      padding: 11px 12px;
+      border-radius: 7px;
+      transition: border-color .16s, box-shadow .16s, background .16s;
+    }
+    textarea:focus, input[type="number"]:focus, input[type="text"]:focus, select:focus {
+      border-color: var(--amber);
+      box-shadow: 0 0 0 3px rgba(181,77,36,.12);
+    }
+    .drop-zone {
+      padding: 18px 16px;
+      border: 1px dashed #afa89e;
+      border-radius: 8px;
+      background: #e6dfc6;
+    }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--amber); background: #f3ecd8; }
+    .drop-zone .file-name { color: var(--amber-dim); }
+    .btn {
+      padding: 10px 16px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      letter-spacing: .07em;
+      transition: opacity .16s, transform .16s, box-shadow .16s, background .16s, border-color .16s;
+    }
+    .btn-primary { background: var(--amber); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--amber-dim); box-shadow: 0 5px 12px rgba(135,55,22,.20); }
+    .btn-secondary { border-color: #afa89e; color: var(--text); }
+    .btn-secondary:hover:not(:disabled) { color: var(--amber-dim); border-color: var(--amber); background: #f3ecd8; }
+    .btn-danger { background: var(--red); }
+    .btn-danger:hover:not(:disabled) { background: #852b23; box-shadow: 0 5px 12px rgba(164,56,45,.20); }
+    .btn-green { background: var(--green); }
+    .btn-green:hover:not(:disabled) { background: #245645; box-shadow: 0 5px 12px rgba(47,107,88,.20); }
+    .btn-small { padding: 7px 10px; }
+    .language-toggle { border-color: #beb59a; background: #efe9d8; border-radius: 7px; }
+    .language-toggle button { color: var(--muted); letter-spacing: .06em; }
+    .language-toggle button.active { background: var(--amber); }
+    .tts-option { border-radius: 8px; background: #f2ecdc; }
+    .voice-session-usage { color: var(--amber-dim); }
+    .mic-meter { background: #d2c9ad; }
+    .mic-meter-fill { background: linear-gradient(90deg, var(--green) 0%, #d48a37 58%, var(--red) 100%); }
+    .mic-meter.active { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(181,77,36,.10); }
+    .steps { margin-bottom: 20px; }
+    .step { letter-spacing: .08em; border-bottom-width: 1px; }
+    .step:hover { color: var(--amber-dim); }
+    .step.active { color: var(--amber); border-color: var(--amber); }
+    #download-section { border-radius: 10px; border-color: #9baa7c; box-shadow: none; }
+    #script-output { background: #faf6ea; border-color: var(--border); }
+    footer { margin-top: 22px; padding-top: 14px; }
+
+    @media (max-width: 680px) {
+      body { padding: 12px; }
+      .shell { padding: 18px; border-radius: 10px; }
+      header { align-items: flex-start; flex-wrap: wrap; }
+      header .sub { width: 100%; order: 4; }
+      .on-air { margin-left: auto; }
+      .voice-library-panel, .voice-drop-panel { flex-basis: 100%; min-width: 0; }
+      .voice-library-controls { flex-wrap: wrap; }
+      .voice-library-controls select { flex-basis: calc(100% - 52px); }
+      .steps { gap: 2px; }
+      .step { font-size: 9px; letter-spacing: .03em; }
+      .script-actions .status-bar { width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -497,20 +619,20 @@
 
   <header>
     <h1>walla-gen</h1>
-    <span class="app-version">v1.0</span>
-    <button class="btn btn-danger btn-small" id="btn-clear-cache" type="button">Clear Cache</button>
+    <span class="app-version">v2.0</span>
+    <button class="btn btn-secondary btn-small" id="btn-clear-cache" type="button">Nettoyer le cache</button>
     <span class="sub">Générateur de voix par IA</span>
     <div class="on-air" id="on-air-indicator">
       <div class="dot"></div>
-      <span>STANDBY</span>
+      <span>PRÊT</span>
     </div>
   </header>
 
   <!-- STEP INDICATORS -->
   <div class="steps">
-    <div class="step active" id="step1">01 · Scénario</div>
-    <div class="step" id="step2">02 · Script</div>
-    <div class="step" id="step3">03 · Audio</div>
+    <button class="step active" id="step1" type="button" data-tab="1">01 · Scénario</button>
+    <button class="step" id="step2" type="button" data-tab="2">02 · Script</button>
+    <button class="step" id="step3" type="button" data-tab="3">03 · Audio</button>
   </div>
 
   <!-- STEP 1 : INPUT -->
@@ -546,6 +668,8 @@
                 <option value="">Chargement des voix sauvegardées...</option>
               </select>
               <button class="btn btn-secondary btn-icon" id="btn-preview-voice" type="button" disabled title="Écouter la voix sauvegardée" aria-label="Écouter la voix sauvegardée">▶</button>
+              <button class="btn btn-secondary btn-icon" id="btn-edit-voice" type="button" disabled title="Corriger la transcription" aria-label="Corriger la transcription">✎</button>
+              <button class="btn btn-danger btn-icon" id="btn-delete-voice" type="button" disabled title="Supprimer la voix" aria-label="Supprimer la voix">×</button>
             </div>
             <div class="voice-session-usage" id="voice-session-usage" aria-live="polite">Session actuelle · aucune voix utilisée</div>
             <div class="status-bar" id="status-library"></div>
@@ -579,7 +703,7 @@
       </div>
 
       <div style="margin-top:14px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
-        <button class="btn btn-primary" id="btn-generate-script">Générer le script →</button>
+        <button class="btn btn-primary" id="btn-generate-script">Générer le script</button>
         <div class="status-bar" id="status-script"></div>
       </div>
     </div>
@@ -599,9 +723,24 @@
           <div class="status-bar" id="status-direction"></div>
         </div>
       </div>
+      <div class="tts-options">
+        <label class="tts-option" for="cleanup-reference">
+          <input type="checkbox" id="cleanup-reference" checked />
+          <span>
+            Nettoyer doucement la référence
+            <small>Réduit le bruit et normalise le niveau. Le fichier original n’est jamais modifié.</small>
+          </span>
+        </label>
+        <label class="tts-option" for="accent-boost">
+          <input type="checkbox" id="accent-boost" checked />
+          <span>
+            Accent québécois renforcé
+            <small>Insiste sur la prosodie québécoise et proscrit l’accent de France métropolitaine.</small>
+          </span>
+        </label>
+      </div>
       <div class="script-actions">
         <button class="btn btn-green" id="btn-generate-audio">🎙 Générer l'audio</button>
-        <button class="btn btn-secondary" id="btn-regen-script">↻ Regénérer le script</button>
         <button class="btn btn-secondary" id="btn-copy">Copier le script</button>
         <div class="status-bar" id="status-audio"></div>
       </div>
@@ -610,48 +749,16 @@
 
   <!-- STEP 3 : DOWNLOAD -->
   <div id="download-section">
-    <div class="big-icon">✅</div>
-    <p>Fichier WAV généré avec succès</p>
-    <button class="btn btn-green" id="btn-download">⬇ Télécharger le WAV</button>
+    <div class="big-icon" id="audio-result-icon">🎧</div>
+    <p id="audio-result-message">Aucun fichier généré pour le moment.</p>
+    <button class="btn btn-green" id="btn-download" type="button" disabled>⬇ Télécharger le WAV</button>
+    <button class="btn btn-danger" id="btn-abort-audio" type="button" disabled>■ Abort</button>
     <div style="margin-top:14px; display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
-      <button class="btn btn-secondary" id="btn-back-script">Retour au script</button>
-      <button class="btn btn-secondary" id="btn-new">Nouvelle génération</button>
     </div>
   </div>
 
-  <section id="walla-section">
-    <div class="section-label">Pro Tools · Walla automatique</div>
-    <div class="card">
-      <p class="walla-paused">⚠ Génération PTX temporairement indisponible. Des correctifs sont encore en cours dans pt_api ; la génération de voix WAV reste pleinement fonctionnelle.</p>
-      <p class="walla-help">Importe la session qui contient les Clip Groups et une template PTX préparée. Chaque groupe doit être nommé <code>F F scénario</code> (français/female), <code>F H scénario</code> (français/male), <code>A F scenario</code> (anglais/female) ou <code>A H scenario</code> (anglais/male). La piste du groupe doit aussi exister dans la template.</p>
-      <p class="walla-help"><strong>Préparation de la template :</strong> crée une session <strong>48 kHz / 32-bit float / 23,976</strong>, ajoute les pistes de destination et importe un court WAV <strong>mono 48 kHz / 32-bit float</strong>. Enlève-le ensuite de la timeline <em>sans</em> faire « Clear Unused » : il doit rester dans le Clip List. Cette session doit n'avoir aucun clip ou événement, visible ou caché, dans la timeline. Une génération réussie télécharge automatiquement un ZIP contenant le PTX, <code>Audio Files</code> et le manifeste.</p>
-      <div class="row">
-        <div class="walla-file">
-          <label for="walla-session-ptx">Importer le .PTX avec les Clip Groups</label>
-          <input id="walla-session-ptx" type="file" accept=".ptx" />
-        </div>
-        <div class="walla-file">
-          <label>Template utilisée automatiquement</label>
-          <div class="walla-help"><code>walla_template.ptx</code> à la racine de walla-gen. Elle doit contenir les pistes de destination préparées.</div>
-        </div>
-      </div>
-      <div class="row" style="margin-top:14px">
-        <div class="grow">
-          <label for="walla-session-name">Nom de la session de sortie</label>
-          <input id="walla-session-name" type="text" value="walla_gen" />
-        </div>
-        <div style="display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
-          <button class="btn btn-secondary" id="btn-inspect-walla" type="button" disabled>Importer et vérifier les Clip Groups</button>
-          <button class="btn btn-green" id="btn-generate-walla" type="button" disabled>Générer le PTX walla</button>
-        </div>
-      </div>
-      <div class="status-bar" id="status-walla"></div>
-      <div class="walla-slots" id="walla-slots" aria-live="polite"></div>
-    </div>
-  </section>
-
   <footer>
-    <span>walla-gen · v1.0</span>
+    <span>walla-gen · v2.0</span>
     <span>
       Claude Haiku · Qwen3-TTS ·
       <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Claude Billing</a>
@@ -678,7 +785,8 @@
   let micAnalyser = null;
   let micMeterFrame = null;
   let micIsStopping = false;
-  let wallaInspection = null;
+  let activeAudioJobId = null;
+  let audioPollTimer = null;
 
   // ── ELEMENTS ──
   const scenarioEl    = document.getElementById('scenario');
@@ -696,20 +804,18 @@
   const btnTranscribe = document.getElementById('btn-transcribe-ref');
   const btnSaveVoice  = document.getElementById('btn-save-voice');
   const btnPreviewVoice = document.getElementById('btn-preview-voice');
+  const btnEditVoice  = document.getElementById('btn-edit-voice');
+  const btnDeleteVoice = document.getElementById('btn-delete-voice');
   const btnGenDirection = document.getElementById('btn-generate-direction');
-  const btnRegenScript= document.getElementById('btn-regen-script');
   const btnGenAudio   = document.getElementById('btn-generate-audio');
   const btnCopy       = document.getElementById('btn-copy');
   const btnDownload   = document.getElementById('btn-download');
-  const btnBackScript = document.getElementById('btn-back-script');
-  const btnNew        = document.getElementById('btn-new');
-  const wallaSessionPtxEl = document.getElementById('walla-session-ptx');
-  const wallaSessionNameEl = document.getElementById('walla-session-name');
-  const btnInspectWalla = document.getElementById('btn-inspect-walla');
-  const btnGenerateWalla = document.getElementById('btn-generate-walla');
+  const btnAbortAudio = document.getElementById('btn-abort-audio');
 
   const scriptOutput  = document.getElementById('script-output');
   const voiceDirectionEl = document.getElementById('voice-direction');
+  const cleanupReferenceEl = document.getElementById('cleanup-reference');
+  const accentBoostEl = document.getElementById('accent-boost');
   const micMeterEl    = document.getElementById('mic-meter');
   const micMeterFillEl = document.getElementById('mic-meter-fill');
   const statusMic     = document.getElementById('status-mic');
@@ -719,8 +825,8 @@
   const voiceSessionUsageEl = document.getElementById('voice-session-usage');
   const statusDirection = document.getElementById('status-direction');
   const statusAudio   = document.getElementById('status-audio');
-  const statusWalla   = document.getElementById('status-walla');
-  const wallaSlotsEl  = document.getElementById('walla-slots');
+  const audioResultIconEl = document.getElementById('audio-result-icon');
+  const audioResultMessageEl = document.getElementById('audio-result-message');
 
   const inputSection    = document.getElementById('input-section');
   const scriptSection   = document.getElementById('script-section');
@@ -764,17 +870,25 @@
   function setOnAir(active) {
     if (active) {
       onAirIndicator.classList.add('active');
-      onAirIndicator.querySelector('span').textContent = 'ON AIR';
+      onAirIndicator.querySelector('span').textContent = 'GÉNÉRATION';
     } else {
       onAirIndicator.classList.remove('active');
-      onAirIndicator.querySelector('span').textContent = 'STANDBY';
+      onAirIndicator.querySelector('span').textContent = 'PRÊT';
     }
   }
 
   function setSteps(active) {
     [step1, step2, step3].forEach((s, i) => {
-      s.className = 'step' + (i + 1 < active ? ' done' : i + 1 === active ? ' active' : '');
+      s.className = 'step' + (i + 1 === active ? ' active' : '');
     });
+  }
+
+  function showTab(tab, focus = false) {
+    inputSection.style.display = tab === 1 ? 'block' : 'none';
+    scriptSection.style.display = tab === 2 ? 'block' : 'none';
+    downloadSection.style.display = tab === 3 ? 'block' : 'none';
+    setSteps(tab);
+    if (focus && tab === 2) scriptOutput.focus();
   }
 
   async function readJsonOrThrow(res) {
@@ -800,6 +914,8 @@
       button.classList.toggle('active', active);
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
+    accentBoostEl.disabled = currentLanguage === 'en';
+    accentBoostEl.checked = currentLanguage === 'fr';
 
     const selectedVoice = savedVoices.find(voice => voice.id === selectedLibraryVoiceId);
     if (selectedVoice && !voiceMatchesLanguage(selectedVoice)) {
@@ -1080,6 +1196,8 @@
       selectedLibraryVoiceId = '';
     }
     btnPreviewVoice.disabled = !selectedLibraryVoiceId;
+    btnEditVoice.disabled = !selectedLibraryVoiceId;
+    btnDeleteVoice.disabled = !selectedLibraryVoiceId;
     renderVoiceSessionUsage();
   }
 
@@ -1102,6 +1220,8 @@
     if (!voice) {
       selectedLibraryVoiceId = '';
       btnPreviewVoice.disabled = true;
+      btnEditVoice.disabled = true;
+      btnDeleteVoice.disabled = true;
       if (!audioRefEl.files[0]) {
         fileNameEl.textContent = '';
         refTextEl.value = '';
@@ -1115,6 +1235,8 @@
     refTextEl.value = voice.transcript || '';
     fileNameEl.textContent = '📚 ' + voice.name;
     btnPreviewVoice.disabled = false;
+    btnEditVoice.disabled = false;
+    btnDeleteVoice.disabled = false;
     setStatus(statusLibrary, 'ok', '✓ Voix chargée depuis la librairie');
   }
 
@@ -1187,7 +1309,6 @@
     }
 
     btnGenScript.disabled = true;
-    btnRegenScript.disabled = true;
     setStatus(statusScript, 'loading', 'Génération du script en cours…', true);
     setOnAir(true);
 
@@ -1202,18 +1323,13 @@
       scriptOutput.value = data.script;
       setStatus(statusScript, 'ok', '✓ Script généré');
       setOnAir(false);
-      setSteps(2);
-
-      inputSection.style.display = 'none';
-      scriptSection.style.display = 'block';
-      scriptOutput.focus();
+      showTab(2, true);
 
     } catch (err) {
       setStatus(statusScript, 'err', '✗ ' + err.message);
       setOnAir(false);
     } finally {
       btnGenScript.disabled = false;
-      btnRegenScript.disabled = false;
     }
   }
 
@@ -1255,6 +1371,10 @@
     button.addEventListener('click', () => setLanguage(button.dataset.language));
   });
 
+  [step1, step2, step3].forEach(step => {
+    step.addEventListener('click', () => showTab(Number(step.dataset.tab), true));
+  });
+
   voiceLibraryEl.addEventListener('change', () => {
     selectLibraryVoice(voiceLibraryEl.value);
   });
@@ -1284,6 +1404,61 @@
     } catch (err) {
       stopVoicePreview();
       setStatus(statusLibrary, 'err', '✗ Lecture bloquée : ' + err.message);
+    }
+  });
+
+  btnEditVoice.addEventListener('click', async () => {
+    const voice = savedVoices.find(item => item.id === selectedLibraryVoiceId);
+    if (!voice) return;
+
+    const transcript = window.prompt(`Corriger la transcription de « ${voice.name} »`, voice.transcript || '');
+    if (transcript === null) return;
+    const cleanTranscript = transcript.trim();
+    if (!cleanTranscript) {
+      setStatus(statusLibrary, 'err', '⚠ La transcription ne peut pas être vide.');
+      return;
+    }
+
+    btnEditVoice.disabled = true;
+    try {
+      const res = await fetch(`/voice-library/${encodeURIComponent(voice.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: cleanTranscript })
+      });
+      const data = await readJsonOrThrow(res);
+      refTextEl.value = data.voice.transcript;
+      await loadVoiceLibrary(voice.id);
+      setStatus(statusLibrary, 'ok', '✓ Transcription corrigée');
+    } catch (err) {
+      setStatus(statusLibrary, 'err', '✗ ' + err.message);
+    } finally {
+      btnEditVoice.disabled = !selectedLibraryVoiceId;
+    }
+  });
+
+  btnDeleteVoice.addEventListener('click', async () => {
+    const voice = savedVoices.find(item => item.id === selectedLibraryVoiceId);
+    if (!voice) return;
+    const confirmed = window.confirm(
+      `Supprimer définitivement la voix « ${voice.name} » et son fichier audio?\n\nCette action est irréversible.`
+    );
+    if (!confirmed) return;
+
+    btnDeleteVoice.disabled = true;
+    try {
+      const res = await fetch(`/voice-library/${encodeURIComponent(voice.id)}`, { method: 'DELETE' });
+      await readJsonOrThrow(res);
+      usedLibraryVoiceIds.delete(voice.id);
+      selectedLibraryVoiceId = '';
+      refTextEl.value = '';
+      fileNameEl.textContent = '';
+      await loadVoiceLibrary();
+      setStatus(statusLibrary, 'ok', '✓ Voix supprimée définitivement');
+    } catch (err) {
+      setStatus(statusLibrary, 'err', '✗ ' + err.message);
+    } finally {
+      btnDeleteVoice.disabled = !selectedLibraryVoiceId;
     }
   });
 
@@ -1372,14 +1547,6 @@
     }
   });
 
-  btnRegenScript.addEventListener('click', () => {
-    scriptSection.style.display = 'none';
-    inputSection.style.display = 'block';
-    setSteps(1);
-    setStatus(statusScript, '', '');
-    generateScript();
-  });
-
   btnGenDirection.addEventListener('click', async () => {
     const scenario = scenarioEl.value.trim();
     const script = scriptOutput.value.trim();
@@ -1417,6 +1584,51 @@
     });
   });
 
+  function setAudioResult(icon, message, canDownload = false) {
+    audioResultIconEl.textContent = icon;
+    audioResultMessageEl.textContent = message;
+    btnDownload.disabled = !canDownload;
+  }
+
+  async function pollAudioJob(jobId) {
+    try {
+      const res = await fetch(`/audio-jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+      const job = await readJsonOrThrow(res);
+      if (job.status === 'queued' || job.status === 'processing') {
+        audioPollTimer = window.setTimeout(() => pollAudioJob(jobId), 800);
+        return;
+      }
+
+      activeAudioJobId = null;
+      btnAbortAudio.disabled = true;
+      btnGenAudio.disabled = false;
+      setOnAir(false);
+      if (job.status === 'succeeded') {
+        const audioRes = await fetch(job.download_url);
+        if (!audioRes.ok) await readJsonOrThrow(audioRes);
+        generatedBlob = await audioRes.blob();
+        markLibraryVoiceAsUsed(selectedLibraryVoiceId);
+        setStatus(statusAudio, 'ok', '✓ Audio généré avec succès');
+        setAudioResult('✅', 'Fichier WAV généré avec succès', true);
+        downloadGeneratedAudio();
+      } else if (job.status === 'cancelled') {
+        setStatus(statusAudio, 'err', 'Génération annulée.');
+        setAudioResult('■', 'Génération annulée.', false);
+      } else {
+        const error = job.error || 'La génération a échoué.';
+        setStatus(statusAudio, 'err', '✗ ' + error);
+        setAudioResult('⚠', error, false);
+      }
+    } catch (err) {
+      activeAudioJobId = null;
+      btnAbortAudio.disabled = true;
+      btnGenAudio.disabled = false;
+      setOnAir(false);
+      setStatus(statusAudio, 'err', '✗ ' + err.message);
+      setAudioResult('⚠', 'Impossible de suivre la génération.', false);
+    }
+  }
+
   // ── GENERATE AUDIO ──
   btnGenAudio.addEventListener('click', async () => {
     const script = scriptOutput.value.trim();
@@ -1434,10 +1646,10 @@
     }
 
     btnGenAudio.disabled = true;
-    btnRegenScript.disabled = true;
     setStatus(statusAudio, 'loading', 'Génération audio Qwen en cours…', true);
+    setAudioResult('⏳', 'Génération en cours. Utilisez Abort si Qwen dérape.', false);
     setOnAir(true);
-    setSteps(3);
+    showTab(3);
 
     try {
       const formData = new FormData();
@@ -1445,213 +1657,49 @@
       formData.append('ref_text', refTextEl.value.trim());
       formData.append('voice_direction', voiceDirectionEl.value.trim());
       formData.append('language', currentLanguage);
+      formData.append('cleanup_reference', cleanupReferenceEl.checked ? 'true' : 'false');
+      formData.append('accent_boost', accentBoostEl.checked ? 'true' : 'false');
       if (audioRefEl.files[0]) {
         formData.append('audio_reference', audioRefEl.files[0]);
       } else {
         formData.append('voice_library_id', selectedLibraryVoiceId);
       }
 
-      const res = await fetch('/generate-audio', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!res.ok) {
-        await readJsonOrThrow(res);
-      }
-
-      const blob = await res.blob();
-      generatedBlob = blob;
-      markLibraryVoiceAsUsed(selectedLibraryVoiceId);
-
-      setStatus(statusAudio, 'ok', '✓ Audio généré avec succès');
-      setOnAir(false);
-      downloadGeneratedAudio();
-
-      scriptSection.style.display = 'none';
-      downloadSection.style.display = 'block';
-
+      const res = await fetch('/generate-audio', { method: 'POST', body: formData });
+      const job = await readJsonOrThrow(res);
+      activeAudioJobId = job.job_id;
+      btnAbortAudio.disabled = false;
+      pollAudioJob(activeAudioJobId);
     } catch (err) {
-      setStatus(statusAudio, 'err', '✗ ' + err.message);
-      setOnAir(false);
-      setSteps(2);
-    } finally {
       btnGenAudio.disabled = false;
-      btnRegenScript.disabled = false;
-    }
-  });
-
-  // ── DOWNLOAD ──
-  btnDownload.addEventListener('click', () => {
-    downloadGeneratedAudio();
-  });
-
-  // ── BACK TO SCRIPT ──
-  btnBackScript.addEventListener('click', () => {
-    downloadSection.style.display = 'none';
-    inputSection.style.display = 'none';
-    scriptSection.style.display = 'block';
-    setSteps(2);
-    setOnAir(false);
-    scriptOutput.focus();
-  });
-
-  // ── NEW GENERATION ──
-  btnNew.addEventListener('click', () => {
-    stopVoicePreview();
-    resetMicMeter();
-    stopMicTracks();
-    micRecorder = null;
-    micChunks = [];
-    micIsStopping = false;
-    btnMicTest.classList.remove('btn-recording');
-    btnMicTest.textContent = '🎙 Micro dictée';
-    scenarioEl.value = '';
-    scriptOutput.value = '';
-    voiceDirectionEl.value = '';
-    refTextEl.value = '';
-    fileNameEl.textContent = '';
-    audioRefEl.value = '';
-    selectedLibraryVoiceId = '';
-    voiceLibraryEl.value = '';
-    generatedBlob = null;
-    setStatus(statusScript, '', '');
-    setStatus(statusMic, '', '');
-    setStatus(statusTranscribe, '', '');
-    setStatus(statusLibrary, '', '');
-    setStatus(statusDirection, '', '');
-    setStatus(statusAudio, '', '');
-    setSteps(1);
-    downloadSection.style.display = 'none';
-    scriptSection.style.display = 'none';
-    inputSection.style.display = 'block';
-  });
-
-  function resetWallaInspection() {
-    wallaInspection = null;
-    btnGenerateWalla.disabled = true;
-    wallaSlotsEl.replaceChildren();
-    setStatus(statusWalla, '', '');
-  }
-
-  function appendWallaSlot(title, detail, error = '') {
-    const item = document.createElement('div');
-    item.className = 'walla-slot';
-    const text = document.createElement('div');
-    const heading = document.createElement('strong');
-    heading.textContent = title;
-    const metadata = document.createElement('small');
-    metadata.textContent = detail;
-    text.append(heading, document.createElement('br'), metadata);
-    item.append(text);
-    if (error) {
-      const message = document.createElement('small');
-      message.className = 'slot-error';
-      message.textContent = '✕ ' + error;
-      item.append(message);
-    }
-    wallaSlotsEl.append(item);
-  }
-
-  function renderWallaInspection(inspection) {
-    wallaSlotsEl.replaceChildren();
-    inspection.slots.forEach(slot => {
-      const language = slot.language === 'en' ? 'ENG' : 'FRAN';
-      const gender = slot.gender === 'female' ? 'Female' : 'Male';
-      appendWallaSlot(
-        slot.group_name,
-        `${slot.track} · ${slot.duration_seconds.toFixed(2)} s · ${language} / ${gender} · ${slot.candidate_voice_count} voix possible${slot.candidate_voice_count > 1 ? 's' : ''}`
-      );
-    });
-    inspection.errors.forEach(item => {
-      appendWallaSlot(item.group_name || 'Clip Group invalide', item.track || 'Piste inconnue', item.error);
-    });
-  }
-
-  function wallaFormData() {
-    if (!wallaSessionPtxEl.files[0]) {
-      throw new Error('Choisissez la session PTX qui contient les Clip Groups.');
-    }
-    const data = new FormData();
-    data.append('session_ptx', wallaSessionPtxEl.files[0]);
-    return data;
-  }
-
-  btnInspectWalla.addEventListener('click', async () => {
-    try {
-      const formData = wallaFormData();
-      btnInspectWalla.disabled = true;
-      btnGenerateWalla.disabled = true;
-      setStatus(statusWalla, 'loading', 'Lecture des Clip Groups et validation des voix…', true);
-      const res = await fetch('/walla/inspect', { method: 'POST', body: formData });
-      const inspection = await readJsonOrThrow(res);
-      wallaInspection = inspection;
-      renderWallaInspection(inspection);
-      const valid = inspection.slots.length;
-      const invalid = inspection.errors.length;
-      if (invalid) {
-        setStatus(statusWalla, 'err', `✕ ${invalid} Clip Group${invalid > 1 ? 's' : ''} à corriger; génération bloquée.`);
-      } else if (!valid) {
-        setStatus(statusWalla, 'err', '✕ Aucun Clip Group walla valide trouvé.');
-      } else {
-        btnGenerateWalla.disabled = false;
-        setStatus(statusWalla, 'ok', `✓ ${valid} Clip Group${valid > 1 ? 's' : ''} prêt${valid > 1 ? 's' : ''}.`);
-      }
-    } catch (err) {
-      resetWallaInspection();
-      setStatus(statusWalla, 'err', '✕ ' + err.message);
-    } finally {
-      btnInspectWalla.disabled = false;
-    }
-  });
-
-  btnGenerateWalla.addEventListener('click', async () => {
-    if (!wallaInspection || !wallaInspection.slots.length || wallaInspection.errors.length) {
-      setStatus(statusWalla, 'err', '✕ Vérifiez les Clip Groups avant de générer.');
-      return;
-    }
-    const count = wallaInspection.slots.length;
-    if (!window.confirm(`Générer ${count} clip${count > 1 ? 's' : ''} walla et construire une nouvelle session PTX?`)) {
-      return;
-    }
-
-    try {
-      const formData = wallaFormData();
-      formData.append('session_name', wallaSessionNameEl.value.trim() || 'walla_gen');
-      btnGenerateWalla.disabled = true;
-      btnInspectWalla.disabled = true;
-      setStatus(statusWalla, 'loading', `Génération de ${count} voix, puis construction du PTX…`, true);
-      setOnAir(true);
-      const res = await fetch('/walla/generate-session', { method: 'POST', body: formData });
-      if (!res.ok) {
-        await readJsonOrThrow(res);
-      }
-      const archive = await res.blob();
-      const url = URL.createObjectURL(archive);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${wallaSessionNameEl.value.trim() || 'walla_gen'}.zip`;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setStatus(statusWalla, 'ok', `✓ Session PTX créée avec ${count} clip${count > 1 ? 's' : ''}. Le ZIP contient le PTX, Audio Files et le manifeste.`);
-    } catch (err) {
-      setStatus(statusWalla, 'err', '✕ ' + err.message);
-    } finally {
-      btnInspectWalla.disabled = false;
-      btnGenerateWalla.disabled = !(wallaInspection && wallaInspection.slots.length && !wallaInspection.errors.length);
+      setStatus(statusAudio, 'err', '✗ ' + err.message);
+      setAudioResult('⚠', 'La génération n’a pas pu démarrer.', false);
       setOnAir(false);
     }
   });
 
-  wallaSessionPtxEl.addEventListener('change', resetWallaInspection);
+  btnAbortAudio.addEventListener('click', async () => {
+    if (!activeAudioJobId) return;
+    btnAbortAudio.disabled = true;
+    setAudioResult('■', 'Annulation demandée à Replicate…', false);
+    try {
+      const res = await fetch(`/audio-jobs/${encodeURIComponent(activeAudioJobId)}/abort`, { method: 'POST' });
+      await readJsonOrThrow(res);
+    } catch (err) {
+      btnAbortAudio.disabled = false;
+      setStatus(statusAudio, 'err', '✗ Annulation impossible : ' + err.message);
+    }
+  });
+
+  btnDownload.addEventListener('click', downloadGeneratedAudio);
 
   window.addEventListener('beforeunload', () => {
+    if (audioPollTimer) window.clearTimeout(audioPollTimer);
     resetMicMeter();
     stopMicTracks();
   });
 
+  showTab(1);
   setLanguage('fr');
   loadVoiceLibrary();
 </script>

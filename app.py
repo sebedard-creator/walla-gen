@@ -11,13 +11,9 @@ import mimetypes
 import shutil
 import logging
 import sys
-import secrets
-import struct
 import subprocess
 from datetime import datetime
 from collections.abc import Iterable
-from html import escape
-import xml.etree.ElementTree as ET
 from flask import Flask, render_template, request, jsonify, send_file
 import anthropic
 import replicate
@@ -37,6 +33,8 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload
 replicate_lock = threading.Lock()
 last_replicate_call = 0.0
 voice_library_lock = threading.Lock()
+generation_jobs_lock = threading.Lock()
+generation_jobs = {}
 VOICE_LIBRARY_DIR = os.path.join(app.root_path, 'voice_library')
 VOICE_LIBRARY_INDEX = os.path.join(VOICE_LIBRARY_DIR, 'index.json')
 VOICE_LIBRARY_EXTENSIONS = {'.wav', '.mp3', '.ogg', '.flac', '.m4a'}
@@ -48,36 +46,6 @@ CACHE_DEBUG_FILES = (
     'last-generation-debug.txt',
     'last-transcription-debug.txt'
 )
-WALLA_SLOT_MAX_SECONDS = float(os.getenv('WALLA_SLOT_MAX_SECONDS', '120'))
-DEFAULT_WALLA_TEMPLATE_PATH = os.getenv('WALLA_TEMPLATE_PATH', 'walla_template.ptx')
-
-
-def get_pt_api_module():
-    """Load the local pt_api checkout without making its path machine-specific."""
-    configured_path = (os.getenv('PT_API_PATH') or '').strip()
-    candidates = []
-    if configured_path:
-        candidates.append(resolve_app_path(configured_path))
-    candidates.append(os.path.abspath(os.path.join(app.root_path, '..', 'pt_api')))
-
-    for candidate in candidates:
-        if os.path.isfile(os.path.join(candidate, 'pt_api.py')) and candidate not in sys.path:
-            sys.path.insert(0, candidate)
-
-    try:
-        import pt_api
-    except ImportError as exc:
-        raise RuntimeError(
-            "pt_api est introuvable. Installez-le dans l'environnement Python ou configurez PT_API_PATH."
-        ) from exc
-
-    if not hasattr(pt_api.ProToolsSession, 'get_timeline_clip_groups'):
-        raise RuntimeError(
-            "pt_api 1.4.0 ou une version plus récente est requise pour lire les Clip Groups."
-        )
-    return pt_api
-
-
 def ensure_voice_library():
     os.makedirs(VOICE_LIBRARY_DIR, exist_ok=True)
 
@@ -111,6 +79,51 @@ def named_cache_file(kind, suffix):
     else:
         raise ValueError("Type de cache invalide.")
     return tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix=prefix, dir=directory)
+
+
+def parse_bool(value, default=False):
+    if value is None:
+        return default
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def prepare_reference_audio_for_tts(source_path, enabled=True):
+    """Create a temporary, gently cleaned clone reference without altering the source."""
+    if not enabled:
+        return source_path, False
+
+    temporary = named_cache_file('input', '.wav')
+    cleaned_path = temporary.name
+    temporary.close()
+    ffmpeg = os.getenv('FFMPEG_EXECUTABLE', 'ffmpeg')
+    audio_filter = (
+        'highpass=f=70,lowpass=f=14000,'
+        'afftdn=nr=6:nf=-35:tn=1,'
+        'loudnorm=I=-18:LRA=7:TP=-1.5'
+    )
+    try:
+        completed = subprocess.run(
+            [
+                ffmpeg, '-y', '-v', 'error', '-i', source_path,
+                '-map', '0:a:0', '-vn', '-af', audio_filter,
+                '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', cleaned_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        if os.path.exists(cleaned_path):
+            os.unlink(cleaned_path)
+        raise RuntimeError("ffmpeg est requis pour nettoyer la voix de référence.") from exc
+
+    if completed.returncode != 0 or not os.path.exists(cleaned_path) or os.path.getsize(cleaned_path) == 0:
+        detail = (completed.stderr or completed.stdout or 'erreur inconnue').strip()
+        if os.path.exists(cleaned_path):
+            os.unlink(cleaned_path)
+        raise RuntimeError(f"Nettoyage de la référence impossible : {detail[:300]}")
+
+    return cleaned_path, True
 
 
 def audio_upload_suffix(filename, mimetype):
@@ -256,169 +269,20 @@ def prune_missing_voice_library_items():
     return kept
 
 
-def normalized_label_token(value):
-    value = unicodedata.normalize('NFD', str(value or ''))
-    value = ''.join(char for char in value if not unicodedata.combining(char))
-    return re.sub(r'[^A-Z0-9]+', '', value.upper())
-
-
-def parse_walla_language(value):
-    token = normalized_label_token(value)
-    if token in ('FR', 'FRA', 'FRAN', 'FRENCH', 'FRANCAIS', 'FRANCAISE'):
-        return 'fr'
-    if token in ('EN', 'ENG', 'ENGLISH', 'ANGLAIS', 'ANGLAISE'):
-        return 'en'
-    return None
-
-
-def parse_walla_gender(value):
-    token = normalized_label_token(value)
-    if token in ('F', 'FEMALE', 'FEMME', 'FEMININ', 'WOMAN'):
-        return 'female'
-    if token in ('M', 'MALE', 'HOMME', 'MASCULIN', 'MAN'):
-        return 'male'
-    return None
-
-
-def parse_walla_slot_name(group_name):
-    """Parse compact Clip Group labels: ``F F scénario`` / ``A H scenario``."""
-    parts = str(group_name or '').strip().split(maxsplit=2)
-    if len(parts) != 3:
-        raise ValueError(
-            "Le nom doit suivre le format « F F scénario », « F H scénario », « A F scenario » ou « A H scenario »."
-        )
-
-    language = {'F': 'fr', 'A': 'en'}.get(normalized_label_token(parts[0]))
-    gender = {'F': 'female', 'H': 'male'}.get(normalized_label_token(parts[1]))
-    scenario = parts[2].strip().strip('"\'«»“”').strip()
-    if not language:
-        raise ValueError("Le premier code doit être F (français) ou A (anglais).")
-    if not gender:
-        raise ValueError("Le deuxième code doit être F (female) ou H (homme/male).")
-    if not scenario:
-        raise ValueError("Le scénario après les deux codes est requis.")
-    return {'language': language, 'gender': gender, 'scenario': scenario}
-
-
-def voice_walla_metadata(voice):
-    """Read optional future metadata, then fall back to the established name prefix."""
-    language = normalize_language(voice.get('language')) if voice.get('language') else None
-    gender = parse_walla_gender(voice.get('gender')) if voice.get('gender') else None
-    name = (voice.get('name') or '').strip()
-
-    parts = re.split(r'\s*(?:\||[-–—]|:)\s*', name, maxsplit=2)
-    if len(parts) >= 2:
-        language = language or parse_walla_language(parts[0])
-        gender = gender or parse_walla_gender(parts[1])
-
-    # Accept concise names such as "FRAN Female - Marie" too.
-    if not language or not gender:
-        match = re.match(
-            r'^\s*(FRAN(?:CAIS(?:E)?)?|FR|ENG(?:LISH)?|EN|ANGLAIS(?:E)?)\b[\s_\-:|]*'
-            r'(FEMALE|FEMME|F|MALE|HOMME|M)\b',
-            name,
-            flags=re.IGNORECASE,
-        )
-        if match:
-            language = language or parse_walla_language(match.group(1))
-            gender = gender or parse_walla_gender(match.group(2))
-
-    return {'language': language, 'gender': gender}
-
-
-def walla_voice_candidates(language, gender):
-    candidates = []
-    for voice in prune_missing_voice_library_items():
-        metadata = voice_walla_metadata(voice)
-        language_matches = metadata['language'] in (None, language)
-        gender_matches = metadata['gender'] == gender
-        if language_matches and gender_matches:
-            candidates.append(voice)
-    return candidates
-
-
-def make_walla_slot_preview(group):
-    parsed = parse_walla_slot_name(group['group_name'])
-    length_samples = int(group['length_samples'])
-    if length_samples <= 0:
-        raise ValueError("La durée du Clip Group doit être supérieure à zéro.")
-    duration_seconds = length_samples / 48_000
-    if duration_seconds > WALLA_SLOT_MAX_SECONDS:
-        raise ValueError(
-            f"Le Clip Group dure {duration_seconds:.1f} s; la limite configurée est {WALLA_SLOT_MAX_SECONDS:.0f} s."
-        )
-    candidates = walla_voice_candidates(parsed['language'], parsed['gender'])
-    if not candidates:
-        language_label = 'FRAN' if parsed['language'] == 'fr' else 'ENG'
-        raise ValueError(
-            f"Aucune voix de librairie compatible ({language_label} / {parsed['gender']}). "
-            "Nommez les voix, par exemple, « FRAN - Female - Marie ».")
-    return {
-        **group,
-        **parsed,
-        'duration_seconds': round(duration_seconds, 3),
-        'candidate_voice_count': len(candidates),
-        'candidate_voice_ids': [voice['id'] for voice in candidates],
-    }
-
-
-def inspect_walla_slots(session_path, template_path=None):
-    pt_api = get_pt_api_module()
-    session = pt_api.ProToolsSession(session_path)
-    if session.sample_rate != 48_000:
-        raise ValueError("La session qui contient les Clip Groups doit être à 48 kHz.")
-
-    template_tracks = []
-    if template_path:
-        template = pt_api.ProToolsSession(template_path)
-        if template.sample_rate != 48_000:
-            raise ValueError("La template PTX doit être à 48 kHz.")
-        template_tracks = template.get_tracks()
-        try:
-            # pt_api 1.4.0 has no public template-preflight method yet. Reuse
-            # its read-only validator here so this fails before any billable
-            # script or TTS request is made.
-            template._validated_audio_import_template()
-        except ValueError as exc:
-            raise ValueError(
-                "La template PTX n'est pas prête pour l'import audio automatique : "
-                f"{exc} Créez-la selon les instructions affichées dans l'interface."
-            ) from exc
-
-    slots = []
-    errors = []
-    for group in session.get_timeline_clip_groups():
-        try:
-            slot = make_walla_slot_preview(group)
-            if template_tracks and slot['track'] not in template_tracks:
-                raise ValueError(
-                    f"La piste « {slot['track']} » n'existe pas dans la template PTX."
-                )
-            slots.append(slot)
-        except ValueError as exc:
-            errors.append({
-                'group_id': group.get('group_id'),
-                'group_name': group.get('group_name', ''),
-                'track': group.get('track', ''),
-                'error': str(exc),
-            })
-
-    return {
-        'slots': slots,
-        'errors': errors,
-        'template_tracks': template_tracks,
-        'sample_rate': session.sample_rate,
-    }
-
-
-def wait_for_replicate_slot():
+def wait_for_replicate_slot(cancel_requested=None):
     global last_replicate_call
     spacing = float(os.getenv('REPLICATE_MIN_SECONDS_BETWEEN_CALLS', '12'))
     with replicate_lock:
-        elapsed = time.monotonic() - last_replicate_call
-        if elapsed < spacing:
-            time.sleep(spacing - elapsed)
+        while True:
+            if cancel_requested and cancel_requested():
+                return False
+            elapsed = time.monotonic() - last_replicate_call
+            remaining = spacing - elapsed
+            if remaining <= 0:
+                break
+            time.sleep(min(remaining, 0.2))
         last_replicate_call = time.monotonic()
+    return True
 
 
 def text_from_anthropic_message(message):
@@ -442,7 +306,7 @@ def prepare_quebec_tts_script(script, language='fr'):
     if normalize_language(language) == 'en':
         return script
 
-    enabled = os.getenv('QUEBEC_TTS_REWRITE', 'true').lower() in ('1', 'true', 'yes', 'on')
+    enabled = os.getenv('QUEBEC_TTS_REWRITE', 'false').lower() in ('1', 'true', 'yes', 'on')
     if not enabled:
         return script
 
@@ -499,13 +363,23 @@ def log_generation_payload(ref_text, tts_script, voice_direction):
         log.write("\n")
 
 
-def build_tts_input(model, tts_script, ref_audio, model_ref_text, voice_direction, language='fr'):
+def build_tts_input(
+    model, tts_script, ref_audio, model_ref_text, voice_direction,
+    language='fr', accent_boost=False
+):
     language = normalize_language(language)
 
     if language == 'en':
         style_instruction = (
             "Speak in natural English with clear diction, matching the reference voice. "
             "Do not add a French accent unless it exists in the reference."
+        )
+    elif accent_boost:
+        style_instruction = (
+            "Parle exclusivement en français canadien du Québec. Conserve les voyelles, "
+            "les diphtongues, le rythme et l'intonation québécois de la voix de référence. "
+            "N'adopte jamais un accent, une diction ou une prosodie de France métropolitaine. "
+            "Le résultat doit rester naturel, sans caricature ni joual forcé."
         )
     else:
         style_instruction = (
@@ -524,6 +398,125 @@ def build_tts_input(model, tts_script, ref_audio, model_ref_text, voice_directio
         "reference_text": model_ref_text,
         "style_instruction": style_instruction
     }
+
+
+def get_generation_job(job_id):
+    with generation_jobs_lock:
+        return generation_jobs.get(job_id)
+
+
+def update_generation_job(job_id, **changes):
+    with generation_jobs_lock:
+        job = generation_jobs.get(job_id)
+        if job:
+            job.update(changes)
+        return job
+
+
+def generation_cancelled(job_id):
+    with generation_jobs_lock:
+        job = generation_jobs.get(job_id)
+        return not job or job['cancel_requested']
+
+
+def create_tts_prediction(client, model, model_input):
+    """Create an asynchronous Replicate prediction that can be cancelled by id."""
+    if ':' in model:
+        return client.predictions.create(version=model.rsplit(':', 1)[1], input=model_input)
+    return client.predictions.create(model=model, input=model_input)
+
+
+def run_audio_generation_job(job_id):
+    job = get_generation_job(job_id)
+    if not job:
+        return
+
+    ref_path = job['ref_path']
+    cleanup_ref = job['cleanup_ref']
+    model_ref_path = None
+    cleanup_model_ref = False
+    try:
+        update_generation_job(job_id, status='processing')
+        if generation_cancelled(job_id):
+            update_generation_job(job_id, status='cancelled')
+            return
+
+        model_ref_path, cleanup_model_ref = prepare_reference_audio_for_tts(
+            ref_path, job['cleanup_reference']
+        )
+        tts_script = strip_inline_stage_directions(
+            prepare_quebec_tts_script(job['script'], job['language'])
+        )
+        model_ref_text = normalize_tts_text(job['ref_text'])
+        log_generation_payload(model_ref_text, tts_script, job['voice_direction'])
+        replicate_client = replicate.Client(api_token=os.getenv('REPLICATE_API_KEY'))
+
+        with open(model_ref_path, 'rb') as ref_audio:
+            model_input = build_tts_input(
+                job['model'], tts_script, ref_audio, model_ref_text,
+                job['voice_direction'], job['language'], accent_boost=job['accent_boost'],
+            )
+            if not wait_for_replicate_slot(lambda: generation_cancelled(job_id)):
+                update_generation_job(job_id, status='cancelled')
+                return
+            prediction = create_tts_prediction(replicate_client, job['model'], model_input)
+
+        update_generation_job(job_id, prediction_id=prediction.id)
+        if generation_cancelled(job_id):
+            try:
+                replicate_client.predictions.cancel(prediction.id)
+            except Exception:
+                pass
+            update_generation_job(job_id, status='cancelled')
+            return
+
+        while True:
+            prediction = replicate_client.predictions.get(prediction.id)
+            status = (prediction.status or '').lower()
+            if status in ('succeeded', 'successful'):
+                break
+            if status in ('failed', 'canceled', 'cancelled', 'aborted'):
+                if generation_cancelled(job_id) or status in ('canceled', 'cancelled', 'aborted'):
+                    update_generation_job(job_id, status='cancelled')
+                else:
+                    update_generation_job(
+                        job_id, status='failed', error=prediction.error or 'La génération Replicate a échoué.'
+                    )
+                return
+            if generation_cancelled(job_id):
+                try:
+                    replicate_client.predictions.cancel(prediction.id)
+                except Exception:
+                    pass
+            time.sleep(0.8)
+
+        if generation_cancelled(job_id):
+            update_generation_job(job_id, status='cancelled')
+            return
+
+        audio_url = str(prediction.output)
+        response = requests.get(audio_url, timeout=120)
+        response.raise_for_status()
+        if generation_cancelled(job_id):
+            update_generation_job(job_id, status='cancelled')
+            return
+
+        tmp_out = named_cache_file('output', '.wav')
+        tmp_out.write(response.content)
+        tmp_out.close()
+        update_generation_job(job_id, status='succeeded', output_path=tmp_out.name)
+    except Exception as exc:
+        app.logger.exception('Génération audio impossible')
+        update_generation_job(
+            job_id,
+            status='cancelled' if generation_cancelled(job_id) else 'failed',
+            error=None if generation_cancelled(job_id) else str(exc),
+        )
+    finally:
+        if cleanup_model_ref and model_ref_path and os.path.exists(model_ref_path):
+            os.unlink(model_ref_path)
+        if cleanup_ref and ref_path and os.path.exists(ref_path):
+            os.unlink(ref_path)
 
 
 def log_transcription(transcript):
@@ -590,359 +583,6 @@ def run_transcription(replicate_client, model, ref_audio, language='fr'):
             "prompt": prompt
         }
     )
-
-
-def generate_walla_script(scenario, duration_seconds, language):
-    language = normalize_language(language)
-    client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-    duration_seconds = max(1, round(float(duration_seconds), 1))
-    if language == 'en':
-        prompt = f"""Write the spoken lines of one person in a natural background conversation.
-
-Scenario: {scenario}
-Target duration: approximately {duration_seconds} seconds.
-
-Rules:
-- Write only natural spoken English for a single voice.
-- It must sound like believable walla/background dialogue, not a narrator or announcement.
-- Use short, speakable sentences and natural punctuation.
-- No speaker labels, stage directions, quotation marks, title, notes, or explanation.
-- Return only the words to be spoken."""
-    else:
-        prompt = f"""Écris les répliques d'une seule personne dans une conversation d'ambiance naturelle.
-
-Scénario : {scenario}
-Durée visée : environ {duration_seconds} secondes.
-
-Règles :
-- Écris uniquement un français québécois parlé, naturel et crédible, pour une seule voix.
-- Le résultat doit sonner comme du walla / une conversation d'arrière-plan, jamais comme une narration ou une annonce.
-- Utilise des phrases courtes, faciles à prononcer et une ponctuation naturelle.
-- Aucune étiquette de personnage, didascalie, guillemet, titre, note ou explication.
-- Retourne uniquement les mots à prononcer."""
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=800,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return text_from_anthropic_message(message)
-
-
-def generate_walla_direction(scenario, script, language):
-    language = normalize_language(language)
-    client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-    if language == 'en':
-        prompt = f"""Write one short performance direction for background-dialogue TTS.
-
-Constraints: maximum 18 words; describe only tone, pace and intensity; no list; no metaphor; mention natural English.
-Scenario: {scenario}
-Script: {script}
-Return only the direction."""
-    else:
-        prompt = f"""Écris une micro-direction de jeu pour un TTS de conversation d'ambiance.
-
-Contraintes : maximum 18 mots; décris seulement le ton, le débit et l'intensité; pas de liste ni métaphore; mentionne « québécois naturel ».
-Scénario : {scenario}
-Texte : {script}
-Retourne uniquement la direction."""
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=80,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return text_from_anthropic_message(message)
-
-
-def generate_audio_from_library_voice(script, library_voice, voice_direction, language):
-    """Generate one WAV from a saved reference voice and return its cache path."""
-    ref_text = (library_voice.get('transcript') or '').strip()
-    if not ref_text:
-        raise ValueError(f"La voix « {library_voice.get('name', '')} » n'a pas de transcription.")
-
-    model = os.getenv(
-        'REPLICATE_TTS_MODEL',
-        'qwen/qwen3-tts:0b366549c7541af95a69454651f4ebf02c699036841cd20b78b9e2a26b4b2750'
-    )
-    ref_path = voice_audio_path(library_voice)
-    tts_script = strip_inline_stage_directions(prepare_quebec_tts_script(script, language))
-    model_ref_text = normalize_tts_text(ref_text)
-    log_generation_payload(model_ref_text, tts_script, voice_direction)
-    replicate_client = replicate.Client(api_token=os.getenv('REPLICATE_API_KEY'))
-    with open(ref_path, 'rb') as ref_audio:
-        model_input = build_tts_input(
-            model, tts_script, ref_audio, model_ref_text, voice_direction, language
-        )
-        wait_for_replicate_slot()
-        output = replicate_client.run(model, input=model_input)
-
-    response = requests.get(str(output), timeout=120)
-    response.raise_for_status()
-    generated = named_cache_file('output', '.wav')
-    generated.write(response.content)
-    generated.close()
-    return generated.name
-
-
-def write_riff_chunk(stream, chunk_id, payload):
-    stream.write(chunk_id)
-    stream.write(struct.pack('<I', len(payload)))
-    stream.write(payload)
-    if len(payload) % 2:
-        stream.write(b'\x00')
-
-
-def render_pt_api_wave(source_path, destination_path, time_reference):
-    """Render arbitrary TTS output as the strict BWF WAV expected by pt_api."""
-    if not 0 <= int(time_reference) <= 0xFFFFFFFF:
-        raise ValueError("La position audio est hors des limites BWF prises en charge.")
-    raw_path = destination_path + '.f32le'
-    ffmpeg = os.getenv('FFMPEG_EXECUTABLE', 'ffmpeg')
-    try:
-        completed = subprocess.run(
-            [
-                ffmpeg, '-y', '-v', 'error', '-i', source_path,
-                '-map', '0:a:0', '-ac', '1', '-ar', '48000', '-f', 'f32le', raw_path,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        raise RuntimeError("ffmpeg est requis pour préparer les WAV Pro Tools.") from exc
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or 'erreur inconnue').strip()
-        raise RuntimeError(f"Conversion audio ffmpeg impossible : {detail[:300]}")
-
-    try:
-        data_size = os.path.getsize(raw_path)
-        if data_size == 0 or data_size % 4:
-            raise ValueError("Le rendu audio converti est vide ou invalide.")
-        sample_count = data_size // 4
-        if sample_count > 0xFFFFFF:
-            raise ValueError("Le rendu audio dépasse la durée maximale prise en charge par pt_api.")
-
-        now = datetime.now()
-        originator = b'walla-gen'.ljust(32, b'\x00')
-        originator_ref = ('WALLA-' + uuid.uuid4().hex[:26]).encode('ascii').ljust(32, b'\x00')
-        basic_umid = ('WALLA-GEN-' + uuid.uuid4().hex[:22]).encode('ascii').ljust(32, b'\x00')
-        bext = (
-            b'walla-gen generated dialogue'.ljust(256, b'\x00')
-            + originator
-            + originator_ref
-            + now.strftime('%Y-%m-%d').encode('ascii')
-            + now.strftime('%H:%M:%S').encode('ascii')
-            + struct.pack('<Q', int(time_reference))
-            + struct.pack('<H', 1)
-            + basic_umid
-            + (b'\x00' * 32)
-        )
-        fmt = (
-            struct.pack('<HHIIHHH', 0xFFFE, 1, 48000, 192000, 4, 32, 22)
-            + struct.pack('<HI', 32, 0x0004)
-            + bytes.fromhex('0300000000001000800000aa00389b71')
-        )
-        riff_size = (
-            4
-            + 8 + len(bext) + (len(bext) % 2)
-            + 8 + len(fmt) + (len(fmt) % 2)
-            + 8 + 4
-            + 8 + data_size + (data_size % 2)
-        )
-        with open(destination_path, 'wb') as destination, open(raw_path, 'rb') as raw:
-            destination.write(b'RIFF')
-            destination.write(struct.pack('<I', riff_size))
-            destination.write(b'WAVE')
-            write_riff_chunk(destination, b'bext', bext)
-            write_riff_chunk(destination, b'fmt ', fmt)
-            write_riff_chunk(destination, b'fact', struct.pack('<I', sample_count))
-            destination.write(b'data')
-            destination.write(struct.pack('<I', data_size))
-            shutil.copyfileobj(raw, destination, length=1024 * 1024)
-            if data_size % 2:
-                destination.write(b'\x00')
-    finally:
-        if os.path.exists(raw_path):
-            os.unlink(raw_path)
-
-
-def safe_walla_name(value):
-    value = unicodedata.normalize('NFD', str(value or ''))
-    value = ''.join(char for char in value if not unicodedata.combining(char))
-    value = re.sub(r'[^A-Za-z0-9_-]+', '_', value).strip('_')
-    return value[:80] or 'walla_gen'
-
-
-def save_uploaded_ptx(upload, label):
-    if not upload or not upload.filename:
-        raise ValueError(f"Le fichier PTX {label} est requis.")
-    if os.path.splitext(upload.filename)[1].lower() != '.ptx':
-        raise ValueError(f"Le fichier {label} doit avoir l'extension .ptx.")
-    stored = named_cache_file('input', '.ptx')
-    upload.save(stored.name)
-    stored.close()
-    return stored.name
-
-
-def resolve_walla_template(upload=None):
-    """Use an explicit upload only when supplied; otherwise use the project template."""
-    if upload and upload.filename:
-        return save_uploaded_ptx(upload, 'template'), True
-    template_path = resolve_app_path(DEFAULT_WALLA_TEMPLATE_PATH)
-    if not os.path.isfile(template_path):
-        raise FileNotFoundError(
-            "La template walla intégrée est introuvable : " + template_path
-        )
-    if os.path.splitext(template_path)[1].lower() != '.ptx':
-        raise ValueError("La template walla intégrée doit avoir l'extension .ptx.")
-    return template_path, False
-
-
-@app.route('/walla/inspect', methods=['POST'])
-def inspect_walla_session():
-    session_path = None
-    template_path = None
-    cleanup_template = False
-    try:
-        session_path = save_uploaded_ptx(request.files.get('session_ptx'), 'avec les Clip Groups')
-        template_path, cleanup_template = resolve_walla_template(request.files.get('template_ptx'))
-        return jsonify(inspect_walla_slots(session_path, template_path))
-    except (ValueError, RuntimeError) as exc:
-        return jsonify({'error': str(exc)}), 400
-    except Exception as exc:
-        return jsonify({'error': f"Lecture du PTX impossible : {str(exc)}"}), 500
-    finally:
-        if session_path and os.path.exists(session_path):
-            os.unlink(session_path)
-        if cleanup_template and template_path and os.path.exists(template_path):
-            os.unlink(template_path)
-
-
-@app.route('/walla/generate-session', methods=['POST'])
-def generate_walla_session():
-    session_path = None
-    template_path = None
-    cleanup_template = False
-    job_directory = None
-    output_directory = None
-    published = False
-    try:
-        session_path = save_uploaded_ptx(request.files.get('session_ptx'), 'avec les Clip Groups')
-        template_path, cleanup_template = resolve_walla_template(request.files.get('template_ptx'))
-        inspection = inspect_walla_slots(session_path, template_path)
-        if inspection['errors']:
-            details = '; '.join(
-                f"{item['group_name'] or 'Clip Group'} : {item['error']}"
-                for item in inspection['errors']
-            )
-            raise ValueError(f"Les Clip Groups doivent être corrigés avant la génération : {details}")
-        if not inspection['slots']:
-            raise ValueError("Aucun Clip Group walla valide n'a été trouvé dans la session.")
-
-        pt_api = get_pt_api_module()
-        session_name = safe_walla_name(request.form.get('session_name') or 'walla_gen')
-        job_directory = tempfile.mkdtemp(prefix='walla_job_', dir=CACHE_OUTPUT_DIR)
-        render_directory = os.path.join(job_directory, 'renders')
-        os.makedirs(render_directory)
-        output_directory = os.path.join(
-            CACHE_OUTPUT_DIR, f"{session_name}_{uuid.uuid4().hex[:10]}"
-        )
-
-        clip_specs = []
-        manifest = []
-        voices_by_id = {voice['id']: voice for voice in prune_missing_voice_library_items()}
-        for position, slot in enumerate(inspection['slots'], start=1):
-            candidates = [
-                voices_by_id[voice_id]
-                for voice_id in slot['candidate_voice_ids']
-                if voice_id in voices_by_id
-            ]
-            if not candidates:
-                raise ValueError(
-                    f"La librairie a changé : aucune voix compatible pour « {slot['group_name']} »."
-                )
-            voice = secrets.choice(candidates)
-            script = generate_walla_script(
-                slot['scenario'], slot['duration_seconds'], slot['language']
-            )
-            direction = generate_walla_direction(slot['scenario'], script, slot['language'])
-            generated_audio = generate_audio_from_library_voice(
-                script, voice, direction, slot['language']
-            )
-            clip_stem = f"WALLA_{position:03d}_{safe_walla_name(slot['scenario'])}"
-            compatible_audio = os.path.join(render_directory, f"{clip_stem}.wav")
-            render_pt_api_wave(generated_audio, compatible_audio, slot['start_samples'])
-            clip_specs.append({
-                'audio_path': compatible_audio,
-                'track_name': slot['track'],
-                'physical_filename': f"{clip_stem}.wav",
-                'clip_name': clip_stem,
-                'placement_start_samples': slot['start_samples'],
-            })
-            manifest.append({
-                'group_id': slot['group_id'],
-                'group_name': slot['group_name'],
-                'track': slot['track'],
-                'start_samples': slot['start_samples'],
-                'length_samples': slot['length_samples'],
-                'duration_seconds': slot['duration_seconds'],
-                'language': slot['language'],
-                'gender': slot['gender'],
-                'scenario': slot['scenario'],
-                'voice_id': voice['id'],
-                'voice_name': voice['name'],
-                'script': script,
-                'direction': direction,
-                'audio_filename': f"{clip_stem}.wav",
-            })
-
-        build_result = pt_api.build_audio_session(
-            template_path, clip_specs, output_directory, session_name=session_name
-        )
-        with open(os.path.join(output_directory, 'WALLA_MANIFEST.json'), 'w', encoding='utf-8') as file:
-            json.dump(
-                {
-                    'created_at': datetime.now().isoformat(timespec='seconds'),
-                    'pt_api_version': getattr(pt_api, '__version__', 'unknown'),
-                    'build_result': build_result,
-                    'slots': manifest,
-                },
-                file,
-                ensure_ascii=False,
-                indent=2,
-            )
-
-        archive_base = os.path.join(CACHE_OUTPUT_DIR, f"{session_name}_{uuid.uuid4().hex[:10]}")
-        archive_path = shutil.make_archive(
-            archive_base,
-            'zip',
-            root_dir=os.path.dirname(output_directory),
-            base_dir=os.path.basename(output_directory),
-        )
-        published = True
-        response = send_file(
-            archive_path,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=f"{session_name}.zip",
-        )
-        response.headers['X-Walla-Slot-Count'] = str(len(manifest))
-        return response
-    except (ValueError, RuntimeError) as exc:
-        return jsonify({'error': str(exc)}), 400
-    except replicate.exceptions.ReplicateError as exc:
-        return jsonify({'error': f"Erreur Replicate : {str(exc)}"}), 500
-    except Exception as exc:
-        app.logger.exception('Génération walla PTX impossible')
-        return jsonify({'error': f"Génération du PTX impossible : {str(exc)}"}), 500
-    finally:
-        if session_path and os.path.exists(session_path):
-            os.unlink(session_path)
-        if cleanup_template and template_path and os.path.exists(template_path):
-            os.unlink(template_path)
-        if job_directory and os.path.isdir(job_directory):
-            shutil.rmtree(job_directory, ignore_errors=True)
-        if output_directory and not published and os.path.isdir(output_directory):
-            shutil.rmtree(output_directory, ignore_errors=True)
 
 
 @app.route('/')
@@ -1037,6 +677,48 @@ def play_voice_reference(voice_id):
 
     mimetype = mimetypes.guess_type(path)[0] or 'application/octet-stream'
     return send_file(path, mimetype=mimetype, as_attachment=False, conditional=True)
+
+
+@app.route('/voice-library/<voice_id>', methods=['PATCH'])
+def update_voice_reference(voice_id):
+    data = request.get_json(silent=True) or {}
+    transcript = str(data.get('transcript') or '').strip()
+    if not transcript:
+        return jsonify({'error': 'La transcription ne peut pas être vide.'}), 400
+
+    with voice_library_lock:
+        items = load_voice_library()
+        for item in items:
+            if item.get('id') == voice_id:
+                item['transcript'] = transcript
+                save_voice_library(items)
+                return jsonify({'voice': public_voice_item(item)})
+
+    return jsonify({'error': 'Voix sauvegardée introuvable.'}), 404
+
+
+@app.route('/voice-library/<voice_id>', methods=['DELETE'])
+def delete_voice_reference(voice_id):
+    with voice_library_lock:
+        items = load_voice_library()
+        item = next((candidate for candidate in items if candidate.get('id') == voice_id), None)
+        if not item:
+            return jsonify({'error': 'Voix sauvegardée introuvable.'}), 404
+
+        try:
+            audio_path = voice_audio_path(item)
+        except (FileNotFoundError, ValueError):
+            audio_path = None
+
+        if audio_path:
+            try:
+                os.unlink(audio_path)
+            except OSError as exc:
+                return jsonify({'error': f"Suppression du fichier audio impossible : {str(exc)}"}), 500
+
+        save_voice_library([candidate for candidate in items if candidate.get('id') != voice_id])
+
+    return jsonify({'deleted_id': voice_id})
 
 
 @app.route('/voice-library', methods=['POST'])
@@ -1274,6 +956,11 @@ def generate_audio():
     audio_file = request.files.get('audio_reference')
     voice_library_id = (request.form.get('voice_library_id') or '').strip()
     language = normalize_language(request.form.get('language'))
+    cleanup_reference = parse_bool(
+        request.form.get('cleanup_reference'),
+        parse_bool(os.getenv('REFERENCE_AUDIO_CLEANUP'), True),
+    )
+    accent_boost = parse_bool(request.form.get('accent_boost'), language == 'fr')
 
     if not script:
         return jsonify({'error': 'Le script est requis.'}), 400
@@ -1309,39 +996,83 @@ def generate_audio():
         else:
             ref_path = voice_audio_path(library_voice)
 
-        tts_script = strip_inline_stage_directions(prepare_quebec_tts_script(script, language))
-        model_ref_text = normalize_tts_text(ref_text)
-        log_generation_payload(model_ref_text, tts_script, voice_direction)
-        replicate_client = replicate.Client(api_token=os.getenv('REPLICATE_API_KEY'))
-        with open(ref_path, 'rb') as ref_audio:
-            model_input = build_tts_input(model, tts_script, ref_audio, model_ref_text, voice_direction, language)
-
-            wait_for_replicate_slot()
-            output = replicate_client.run(model, input=model_input)
-
-        # output is a URL string pointing to the generated WAV
-        audio_url = str(output)
-        response = requests.get(audio_url, timeout=120)
-        response.raise_for_status()
-
-        tmp_out = named_cache_file('output', '.wav')
-        tmp_out.write(response.content)
-        tmp_out.close()
-
-        return send_file(
-            tmp_out.name,
-            mimetype='audio/wav',
-            as_attachment=True,
-            download_name='generation_quebec.wav'
-        )
-
-    except replicate.exceptions.ReplicateError as e:
-        return jsonify({'error': f'Erreur Replicate : {str(e)}'}), 500
+        job_id = uuid.uuid4().hex
+        job = {
+            'id': job_id,
+            'status': 'queued',
+            'created_at': datetime.now().isoformat(timespec='seconds'),
+            'script': script,
+            'ref_text': ref_text,
+            'voice_direction': voice_direction,
+            'language': language,
+            'cleanup_reference': cleanup_reference,
+            'accent_boost': accent_boost,
+            'model': model,
+            'ref_path': ref_path,
+            'cleanup_ref': cleanup_ref,
+            'prediction_id': None,
+            'cancel_requested': False,
+            'output_path': None,
+            'error': None,
+        }
+        with generation_jobs_lock:
+            generation_jobs[job_id] = job
+        threading.Thread(target=run_audio_generation_job, args=(job_id,), daemon=True).start()
+        return jsonify({'job_id': job_id, 'status': 'queued'}), 202
     except Exception as e:
-        return jsonify({'error': f'Erreur lors de la génération audio : {str(e)}'}), 500
-    finally:
         if cleanup_ref and ref_path and os.path.exists(ref_path):
             os.unlink(ref_path)
+        return jsonify({'error': f'Erreur lors de la génération audio : {str(e)}'}), 500
+
+
+@app.route('/audio-jobs/<job_id>', methods=['GET'])
+def audio_generation_status(job_id):
+    job = get_generation_job(job_id)
+    if not job:
+        return jsonify({'error': 'Génération introuvable.'}), 404
+
+    payload = {
+        'job_id': job['id'],
+        'status': job['status'],
+        'error': job['error'],
+    }
+    if job['status'] == 'succeeded':
+        payload['download_url'] = f'/audio-jobs/{job_id}/download'
+    return jsonify(payload)
+
+
+@app.route('/audio-jobs/<job_id>/abort', methods=['POST'])
+def abort_audio_generation(job_id):
+    with generation_jobs_lock:
+        job = generation_jobs.get(job_id)
+        if not job:
+            return jsonify({'error': 'Génération introuvable.'}), 404
+        if job['status'] in ('succeeded', 'failed', 'cancelled'):
+            return jsonify({'status': job['status']})
+        job['cancel_requested'] = True
+        prediction_id = job['prediction_id']
+
+    if prediction_id:
+        try:
+            replicate.Client(api_token=os.getenv('REPLICATE_API_KEY')).predictions.cancel(prediction_id)
+        except Exception as exc:
+            app.logger.info('Annulation Replicate non confirmée pour %s : %s', job_id, exc)
+    return jsonify({'status': 'cancelling'})
+
+
+@app.route('/audio-jobs/<job_id>/download', methods=['GET'])
+def download_audio_generation(job_id):
+    job = get_generation_job(job_id)
+    if not job:
+        return jsonify({'error': 'Génération introuvable.'}), 404
+    if job['status'] != 'succeeded' or not job['output_path'] or not os.path.isfile(job['output_path']):
+        return jsonify({'error': 'Le fichier audio n’est pas prêt.'}), 409
+    return send_file(
+        job['output_path'],
+        mimetype='audio/wav',
+        as_attachment=True,
+        download_name='generation_quebec.wav',
+    )
 
 
 if __name__ == '__main__':
