@@ -13,7 +13,7 @@ walla-gen is a local web application for script generation and voice cloning in 
 - Generates Quebec French or English scripts with `claude-haiku-4-5-20251001`.
 - Automatically generates a short voice-performance direction.
 - Performs voice cloning with Qwen3-TTS through Replicate.
-- Gently cleans noisy reference audio in a temporary copy before cloning; saved library files are never modified.
+- Peak-normalizes reference audio in a temporary copy before cloning, without denoising or filtering it; saved library files are never modified.
 - Offers an optional Quebec-oriented text rewrite and a strengthened Quebec-accent instruction that explicitly rejects Metropolitan French prosody. Rewriting is disabled by default so the displayed script remains unchanged.
 - Transcribes reference files with `openai/gpt-4o-mini-transcribe` through Replicate.
 - Records audio from the browser microphone and transcribes it into the scenario field.
@@ -39,7 +39,7 @@ walla-gen is a local web application for script generation and voice cloning in 
 - Anthropic for script and performance-direction generation.
 - Replicate for transcription and Qwen3-TTS.
 - `cryptography` for creating local HTTPS certificates with `setup_https.py`.
-- `ffmpeg` for gentle reference-audio cleanup before voice cloning.
+- `ffmpeg` for reference-level normalization before voice cloning.
 - PyManager as the startup manager on the current machine; direct startup is also supported.
 
 Azure Speech, CosyVoice, Chatterbox, and Whisper are no longer part of the pipeline.
@@ -63,7 +63,7 @@ The current `.env.example` values enable:
 - HTTPS on port `5051`;
 - the `certs/walla-server.crt` and `certs/walla-server.key` certificate files;
 - exact script preservation with `QUEBEC_TTS_REWRITE=false`;
-- temporary reference-audio cleanup with `REFERENCE_AUDIO_CLEANUP=true`.
+- temporary peak normalization with `REFERENCE_AUDIO_NORMALIZATION=true`.
 
 ## Local HTTPS and microphone access
 
@@ -125,10 +125,10 @@ The user interface is in French. The main workflow is:
 4. Provide or generate the exact transcript of the reference audio.
 5. Generate and edit the script.
 6. Enter or automatically generate a voice-performance direction.
-7. Keep or disable the reference cleanup option. In French, the strengthened Quebec-accent option is also enabled by default.
+7. Keep or disable reference-level normalization. In French, the strengthened Quebec-accent option is also enabled by default.
 8. Generate and download the WAV file. If Qwen gets stuck, open the **Audio** panel and select **Abort**.
 
-Reference cleanup creates a temporary mono 24 kHz WAV with mild noise reduction and level normalization. It does not overwrite uploaded files or anything in `voice_library/`. The Quebec-accent option is disabled automatically when English is selected.
+Reference normalization creates a temporary mono 24 kHz WAV whose peak is adjusted to -3 dBFS. It applies no noise reduction or frequency filtering and does not overwrite uploaded files or anything in `voice_library/`. The Quebec-accent option is disabled automatically when English is selected.
 
 Scenario microphone dictation currently uses a French transcription prompt even when English is selected. Reference-audio transcription does respect the selected language.
 

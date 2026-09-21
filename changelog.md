@@ -12,6 +12,7 @@
 ### Modifié
 
 - Interface mise à niveau en **v2.0** : palette chaude à faible éblouissement, hiérarchie visuelle simplifiée et présentation adaptée aux écrans mobiles.
+- La préparation des références effectue désormais uniquement une normalisation de crête à -3 dBFS. Le débruitage et les filtres ont été retirés afin de préserver les chuchotements, les ambiances et les défauts voulus.
 
 ### Retiré
 
@@ -21,7 +22,7 @@
 
 ### Ajouté
 
-- Nettoyage léger et temporaire des références de clonage avec `ffmpeg`.
+- Préparation temporaire des références de clonage avec `ffmpeg` (remplacée depuis par une normalisation de niveau sans débruitage).
 - Option **Accent québécois renforcé** dans l'interface française.
 
 ### Modifié

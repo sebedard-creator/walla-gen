@@ -724,11 +724,11 @@
         </div>
       </div>
       <div class="tts-options">
-        <label class="tts-option" for="cleanup-reference">
-          <input type="checkbox" id="cleanup-reference" checked />
+        <label class="tts-option" for="normalize-reference">
+          <input type="checkbox" id="normalize-reference" checked />
           <span>
-            Nettoyer doucement la référence
-            <small>Réduit le bruit et normalise le niveau. Le fichier original n’est jamais modifié.</small>
+            Normaliser le niveau de la référence
+            <small>Ajuste uniquement le volume. Aucun débruitage ni filtre; le fichier original n’est jamais modifié.</small>
           </span>
         </label>
         <label class="tts-option" for="accent-boost">
@@ -814,7 +814,7 @@
 
   const scriptOutput  = document.getElementById('script-output');
   const voiceDirectionEl = document.getElementById('voice-direction');
-  const cleanupReferenceEl = document.getElementById('cleanup-reference');
+  const normalizeReferenceEl = document.getElementById('normalize-reference');
   const accentBoostEl = document.getElementById('accent-boost');
   const micMeterEl    = document.getElementById('mic-meter');
   const micMeterFillEl = document.getElementById('mic-meter-fill');
@@ -1657,7 +1657,7 @@
       formData.append('ref_text', refTextEl.value.trim());
       formData.append('voice_direction', voiceDirectionEl.value.trim());
       formData.append('language', currentLanguage);
-      formData.append('cleanup_reference', cleanupReferenceEl.checked ? 'true' : 'false');
+      formData.append('normalize_reference', normalizeReferenceEl.checked ? 'true' : 'false');
       formData.append('accent_boost', accentBoostEl.checked ? 'true' : 'false');
       if (audioRefEl.files[0]) {
         formData.append('audio_reference', audioRefEl.files[0]);

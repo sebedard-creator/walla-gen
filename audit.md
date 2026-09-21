@@ -2,7 +2,7 @@
 
 État vérifié le 21 août 2026.
 
-Le pipeline actif est limité à Anthropic pour les scripts et directions, Replicate pour la transcription et Qwen3-TTS, ainsi qu'à `ffmpeg` pour le nettoyage temporaire des références. Il n'y a plus d'intégration Pro Tools/PTX ni de dépendance `pt_api`.
+Le pipeline actif est limité à Anthropic pour les scripts et directions, Replicate pour la transcription et Qwen3-TTS, ainsi qu'à `ffmpeg` pour la normalisation de niveau temporaire des références. Cette normalisation n'applique aucun débruitage ni filtre. Il n'y a plus d'intégration Pro Tools/PTX ni de dépendance `pt_api`.
 
 La bibliothèque de voix reste locale et ignorée par Git. Ses routes permettent de lister, sauvegarder, corriger la transcription, écouter et supprimer une voix. La suppression retire l'entrée de l'index et le fichier audio après confirmation explicite dans l'interface.
 

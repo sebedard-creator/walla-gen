@@ -21,7 +21,7 @@ La bibliothèque est filtrée dans le navigateur : `FRAN` en français, `ENG` en
 ## Génération audio
 
 1. `POST /generate-audio` valide la requête, conserve temporairement un éventuel téléversement et démarre une tâche en arrière-plan.
-2. La tâche prépare une copie temporaire mono 24 kHz de la référence quand `REFERENCE_AUDIO_CLEANUP=true`. L'original, y compris dans `voice_library/`, ne change jamais.
+2. La tâche prépare une copie temporaire mono 24 kHz de la référence quand `REFERENCE_AUDIO_NORMALIZATION=true`. Son pic est ajusté à -3 dBFS sans débruitage ni filtrage. L'original, y compris dans `voice_library/`, ne change jamais.
 3. Le script est nettoyé des didascalies. `QUEBEC_TTS_REWRITE` reste désactivé par défaut afin de transmettre exactement le texte affiché.
 4. Une prédiction Replicate asynchrone est créée pour Qwen3-TTS, puis suivie par `GET /audio-jobs/<job_id>`.
 5. `POST /audio-jobs/<job_id>/abort` demande l'annulation à Replicate. La tâche cesse aussi si elle est encore en attente locale.

@@ -87,8 +87,8 @@ def parse_bool(value, default=False):
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
-def prepare_reference_audio_for_tts(source_path, enabled=True):
-    """Create a temporary, gently cleaned clone reference without altering the source."""
+def normalize_reference_audio_for_tts(source_path, enabled=True):
+    """Peak-normalize a temporary clone reference without denoising or filtering it."""
     if not enabled:
         return source_path, False
 
@@ -96,16 +96,27 @@ def prepare_reference_audio_for_tts(source_path, enabled=True):
     cleaned_path = temporary.name
     temporary.close()
     ffmpeg = os.getenv('FFMPEG_EXECUTABLE', 'ffmpeg')
-    audio_filter = (
-        'highpass=f=70,lowpass=f=14000,'
-        'afftdn=nr=6:nf=-35:tn=1,'
-        'loudnorm=I=-18:LRA=7:TP=-1.5'
-    )
     try:
+        analysis = subprocess.run(
+            [
+                ffmpeg, '-hide_banner', '-i', source_path,
+                '-map', '0:a:0', '-af', 'volumedetect', '-f', 'null', os.devnull,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        match = re.search(r'max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB', analysis.stderr or '')
+        if analysis.returncode != 0 or not match:
+            detail = (analysis.stderr or analysis.stdout or 'niveau audio illisible').strip()
+            raise RuntimeError(f"Analyse du niveau impossible : {detail[-300:]}")
+
+        peak_db = float(match.group(1))
+        gain_db = -3.0 - peak_db
         completed = subprocess.run(
             [
                 ffmpeg, '-y', '-v', 'error', '-i', source_path,
-                '-map', '0:a:0', '-vn', '-af', audio_filter,
+                '-map', '0:a:0', '-vn', '-af', f'volume={gain_db:.2f}dB',
                 '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', cleaned_path,
             ],
             capture_output=True,
@@ -115,13 +126,13 @@ def prepare_reference_audio_for_tts(source_path, enabled=True):
     except OSError as exc:
         if os.path.exists(cleaned_path):
             os.unlink(cleaned_path)
-        raise RuntimeError("ffmpeg est requis pour nettoyer la voix de référence.") from exc
+        raise RuntimeError("ffmpeg est requis pour normaliser la voix de référence.") from exc
 
     if completed.returncode != 0 or not os.path.exists(cleaned_path) or os.path.getsize(cleaned_path) == 0:
         detail = (completed.stderr or completed.stdout or 'erreur inconnue').strip()
         if os.path.exists(cleaned_path):
             os.unlink(cleaned_path)
-        raise RuntimeError(f"Nettoyage de la référence impossible : {detail[:300]}")
+        raise RuntimeError(f"Normalisation de la référence impossible : {detail[:300]}")
 
     return cleaned_path, True
 
@@ -441,8 +452,8 @@ def run_audio_generation_job(job_id):
             update_generation_job(job_id, status='cancelled')
             return
 
-        model_ref_path, cleanup_model_ref = prepare_reference_audio_for_tts(
-            ref_path, job['cleanup_reference']
+        model_ref_path, cleanup_model_ref = normalize_reference_audio_for_tts(
+            ref_path, job['normalize_reference']
         )
         tts_script = strip_inline_stage_directions(
             prepare_quebec_tts_script(job['script'], job['language'])
@@ -956,9 +967,9 @@ def generate_audio():
     audio_file = request.files.get('audio_reference')
     voice_library_id = (request.form.get('voice_library_id') or '').strip()
     language = normalize_language(request.form.get('language'))
-    cleanup_reference = parse_bool(
-        request.form.get('cleanup_reference'),
-        parse_bool(os.getenv('REFERENCE_AUDIO_CLEANUP'), True),
+    normalize_reference = parse_bool(
+        request.form.get('normalize_reference', request.form.get('cleanup_reference')),
+        parse_bool(os.getenv('REFERENCE_AUDIO_NORMALIZATION'), True),
     )
     accent_boost = parse_bool(request.form.get('accent_boost'), language == 'fr')
 
@@ -1005,7 +1016,7 @@ def generate_audio():
             'ref_text': ref_text,
             'voice_direction': voice_direction,
             'language': language,
-            'cleanup_reference': cleanup_reference,
+            'normalize_reference': normalize_reference,
             'accent_boost': accent_boost,
             'model': model,
             'ref_path': ref_path,
