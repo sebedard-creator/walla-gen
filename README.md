@@ -145,3 +145,7 @@ The **Clear Cache** button deletes cached files and both diagnostic files. It do
 ## Deployment limitations
 
 The built-in Werkzeug server is suitable for this local/LAN use case, but the project is not configured as a public web service. It has no user accounts or route authentication. Do not expose ports 5050 or 5051 directly to the Internet.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
